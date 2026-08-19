@@ -1,31 +1,63 @@
-# ---- Docs & notes: keep locally, do NOT push ----
-*.pdf
-*.docx
-*.pptx
-# keep README.md (repo front page); ignore all other markdown
-*.md
-!README.md
-prompt.txt
-Testing.txt
+# ---------------------------------------------------------------------------
+# Big files. Kept out on purpose, not by accident.
+#
+# All of these can be rebuilt from the scripts in this repo, and together they
+# are ~500MB, which would make every clone slow forever. See
+# WHERE_I_LEFT_OFF.txt for the exact commands to regenerate each one.
+# ---------------------------------------------------------------------------
 
-# ---- Django / Python ----
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# The trained DistilBERT. 255MB for model.safetensors alone, which is over
+# GitHub's 100MB per-file hard limit, so this CANNOT be pushed without git-lfs.
+# Rebuild: train_reading_model_v3.ipynb on Colab (~40 min), then tune_cutoff.py.
+analyzer/reading_model/
+
+# The old TF-IDF word-counter. Rebuild: python train_honest_model.py
+analyzer/model.pkl
+analyzer/vectorizer.pkl
+analyzer/model_meta.json
+
+# Training and test data, ~206MB.
+#   Fake.csv, True.csv          ISOT, from Kaggle
+#   fake_or_real_news.csv       McIntire -- THE EXAM
+#   diverse_fakes.csv           python fetch_diverse_fakes.py
+#   diverse_reals.csv           python fetch_diverse_reals.py
+*.csv
+
+# The fact-check database, 45MB. Rebuild: python load_mega_data.py
 db.sqlite3
-db.sqlite3-journal
-*.log
-local_settings.py
-.pytest_cache/
 
-# ---- Virtual envs ----
+# ---------------------------------------------------------------------------
+# Ordinary Python and editor noise
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
 venv/
 .venv/
-env/
+ENV/
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# ---- OS / editor cruft ----
-.DS_Store
-Thumbs.db
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Editors and OS
 .vscode/
 .idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and local settings
+*.log
+local_settings.py
+.env
+.env.*

@@ -292,6 +292,15 @@ body {
     color: white;
 }
 
+/* "Not Sure" — deliberately neutral slate, not amber.
+   The reading model returns this when its judgement has been measured as too
+   unreliable to report, which is not the same as "this looks suspicious".
+   Any warm colour here would imply an accusation the verdict does not make. */
+.result-unsure {
+    background: linear-gradient(135deg, #475569, #64748b);
+    color: white;
+}
+
 .keyword-section {
     padding: 1rem;
     border-radius: 12px;
@@ -351,6 +360,9 @@ body {
 
 .stat-fake .stat-icon { color: var(--color-fake); }
 .stat-fake .stat-number { color: var(--color-fake); }
+
+.stat-unsure .stat-icon { color: #64748b; }
+.stat-unsure .stat-number { color: #475569; }
 
 /* Chart Cards */
 .chart-card {

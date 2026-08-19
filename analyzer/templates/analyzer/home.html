@@ -14,16 +14,12 @@ The first page users see. Shows project overview and a CTA to start analyzing.
         <div class="row align-items-center min-vh-75">
             <div class="col-lg-7">
                 <div class="hero-badge mb-3">
-                    <i class="bi bi-cpu me-1"></i> Rule-Based Classification
+                    <i class="bi bi-cpu me-1"></i> Hybrid AI & Database System
                 </div>
                 <h1 class="hero-title">
                     Detect <span class="text-gradient">Fake News</span> Instantly
                 </h1>
-                <p class="hero-subtitle">
-                    A smart text analysis system that uses keyword scoring to classify news articles 
-                    as <strong>Likely Real</strong>, <strong>Suspicious</strong>, or <strong>Likely Fake</strong> 
-                    — no machine learning required.
-                </p>
+                
                 <div class="d-flex gap-3 flex-wrap">
                     <a href="{% url 'analyze' %}" class="btn btn-primary btn-lg px-4" id="cta-analyze">
                         <i class="bi bi-search me-2"></i>Analyze News Now
@@ -41,62 +37,9 @@ The first page users see. Shows project overview and a CTA to start analyzing.
                 </div>
                 {% endif %}
             </div>
-            <div class="col-lg-5 d-none d-lg-block">
-                <div class="hero-visual">
-                    <div class="hero-card card-real">
-                        <i class="bi bi-check-circle-fill"></i>
-                        <span>Likely Real</span>
-                        <small>Score: 1</small>
-                    </div>
-                    <div class="hero-card card-suspicious">
-                        <i class="bi bi-exclamation-triangle-fill"></i>
-                        <span>Suspicious</span>
-                        <small>Score: 5</small>
-                    </div>
-                    <div class="hero-card card-fake">
-                        <i class="bi bi-x-circle-fill"></i>
-                        <span>Likely Fake</span>
-                        <small>Score: 9</small>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 </section>
 
-<!-- Features Section -->
-<section class="features-section">
-    <div class="container">
-        <h2 class="text-center mb-5 fw-bold">How It Works</h2>
-        <div class="row g-4">
-            <div class="col-md-4">
-                <div class="feature-card">
-                    <div class="feature-icon bg-primary-subtle">
-                        <i class="bi bi-pencil-square text-primary"></i>
-                    </div>
-                    <h5>1. Enter News</h5>
-                    <p>Paste a headline or article text into the analyzer form.</p>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="feature-card">
-                    <div class="feature-icon bg-warning-subtle">
-                        <i class="bi bi-gear text-warning"></i>
-                    </div>
-                    <h5>2. Keyword Analysis</h5>
-                    <p>Our engine scans for fake indicators, emotional language, and credibility markers.</p>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="feature-card">
-                    <div class="feature-icon bg-success-subtle">
-                        <i class="bi bi-clipboard-data text-success"></i>
-                    </div>
-                    <h5>3. Get Results</h5>
-                    <p>See a clear classification with score breakdown and keyword explanation.</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
+
 {% endblock %}

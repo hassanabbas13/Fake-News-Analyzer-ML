@@ -1,1 +1,33 @@
-Django==5.0.6
+# Pinned to the versions this project is actually developed and tested against
+# (Python 3.12). Install with:  python -m pip install -r requirements.txt
+
+# ---- Web framework ----
+Django==6.0.5
+
+# ---- Machine learning ----
+# Required AT RUNTIME, not just for training: analysis_engine.py unpickles
+# analyzer/model.pkl and analyzer/vectorizer.pkl, which imports scikit-learn.
+# numpy/scipy are pulled in by scikit-learn but pinned here because the pickles
+# must be loaded with a compatible version of them.
+scikit-learn==1.8.0
+numpy==2.4.0
+scipy==1.17.0
+
+# ---- The reading model ----
+# Required AT RUNTIME by analysis_engine.py, which loads the fine-tuned
+# DistilBERT model in analyzer/reading_model/ to score unknown articles.
+#
+# These are large — torch alone is roughly 2.5GB installed. If they are missing
+# the app still runs: Step 2 falls back to the TF-IDF word-counter below and the
+# result page says so. So this is a heavy dependency, not a required one.
+#
+# No GPU is needed. Answering takes about 0.2 seconds per article on a normal
+# processor; the model loads on the first analysis after a restart, which makes
+# that one request a few seconds slower.
+torch==2.10.0
+transformers==5.1.0
+
+# ---- Data loading ----
+# Only needed by the one-off setup scripts (load_mega_data.py, train_mega_model.py,
+# train_honest_model.py, tune_cutoff.py), not by the web app itself.
+pandas==2.3.3

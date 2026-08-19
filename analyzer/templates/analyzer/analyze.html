@@ -28,33 +28,18 @@ On submit, the form POSTs to the same URL, which triggers analysis.
                         <form method="POST" action="{% url 'analyze' %}" id="analyze-form">
                             {% csrf_token %}
                             
-                            <!-- Headline Input -->
+                            <!-- Single Content Input -->
                             <div class="mb-4">
-                                <label for="headline-input" class="form-label fw-semibold">
-                                    <i class="bi bi-newspaper me-1"></i>News Headline
-                                    <span class="text-muted fw-normal">(Optional)</span>
-                                </label>
-                                {{ form.headline }}
-                                {% if form.headline.errors %}
-                                    <div class="text-danger small mt-1">
-                                        {{ form.headline.errors }}
-                                    </div>
-                                {% endif %}
-                            </div>
-                            
-                            <!-- Article Text Input -->
-                            <div class="mb-4">
-                                <label for="article-input" class="form-label fw-semibold">
-                                    <i class="bi bi-file-text me-1"></i>Article Text
+                                <label for="content-input" class="form-label fw-semibold">
+                                    <i class="bi bi-file-text me-1"></i>Paste News or Article
                                     <span class="text-danger">*</span>
                                 </label>
-                                {{ form.article_text }}
-                                {% if form.article_text.errors %}
+                                {{ form.news_content }}
+                                {% if form.news_content.errors %}
                                     <div class="text-danger small mt-1">
-                                        {{ form.article_text.errors }}
+                                        {{ form.news_content.errors }}
                                     </div>
                                 {% endif %}
-
                             </div>
                             
                             <!-- Submit Button -->
@@ -67,28 +52,10 @@ On submit, the form POSTs to the same URL, which triggers analysis.
                     </div>
                 </div>
 
-                <!-- Quick Tips -->
-                <div class="card mt-4 tips-card">
-                    <div class="card-body">
-                        <h6 class="fw-bold mb-3">
-                            <i class="bi bi-lightbulb text-warning me-2"></i>Try These Examples:
-                        </h6>
-                        <div class="row g-2">
-                            <div class="col-md-6">
-                                <div class="tip-item tip-fake" onclick="document.getElementById('headline-input').value = this.dataset.text" data-text="SHOCKING: You Won't Believe This Miracle Cure That Doctors Are Hiding!!!">
-                                    <i class="bi bi-x-circle text-danger me-1"></i>
-                                    <small>Click to try a fake-looking headline</small>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="tip-item tip-real" onclick="document.getElementById('headline-input').value = this.dataset.text" data-text="New research study published in medical journal shows promising results">
-                                    <i class="bi bi-check-circle text-success me-1"></i>
-                                    <small>Click to try a real-looking headline</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <p class="text-muted small text-center mt-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Tip: put the headline on the first line and the article body below it.
+                </p>
             </div>
         </div>
     </div>

@@ -15,29 +15,15 @@ from django import forms
 
 class NewsInputForm(forms.Form):
     """
-    Form for users to enter news headline and optional article text.
-    
-    - headline: required text field (max 500 characters)
-    - article_text: optional textarea for longer article content
+    Form for users to enter a news headline or full article text.
     """
-    
-    headline = forms.CharField(
-        max_length=500,
-        required=False,
-        label='News Headline',
-        widget=forms.TextInput(attrs={
-            'class': 'form-control form-control-lg',
-            'placeholder': 'Enter a news headline (optional)...',
-            'id': 'headline-input',
-        })
-    )
-    
-    article_text = forms.CharField(
-        label='Article Text',
+    news_content = forms.CharField(
+        label='News or Article Text',
+        required=True,
         widget=forms.Textarea(attrs={
             'class': 'form-control',
-            'placeholder': 'Paste the full article text here...',
-            'rows': 5,
-            'id': 'article-input',
+            'placeholder': 'Paste your news headline or full article text here...',
+            'rows': 6,
+            'id': 'content-input',
         })
     )

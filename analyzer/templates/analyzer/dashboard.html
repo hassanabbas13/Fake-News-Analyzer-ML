@@ -2,9 +2,9 @@
 dashboard.html — Analytics Dashboard
 =======================================
 Shows:
-  - Summary stat cards (total, real, suspicious, fake)
+  - Summary stat cards (total, real, fake)
   - Pie chart (distribution of results)
-  - Bar chart (most common fake keywords)
+  - Bar chart (database fact-check matches vs. AI predictions)
   - Table of recent analyses
 
 Charts are rendered using Chart.js (loaded from CDN).
@@ -40,7 +40,7 @@ Chart data is fetched via JavaScript from the /api/dashboard-data/ endpoint.
         <!-- STAT CARDS                                                    -->
         <!-- ============================================================ -->
         <div class="row g-3 mb-4">
-            <div class="col-6 col-md-3">
+            <div class="col-12 col-md-3">
                 <div class="stat-card stat-total">
                     <div class="stat-icon"><i class="bi bi-clipboard-data"></i></div>
                     <div class="stat-number">{{ total }}</div>
@@ -55,17 +55,21 @@ Chart data is fetched via JavaScript from the /api/dashboard-data/ endpoint.
                 </div>
             </div>
             <div class="col-6 col-md-3">
-                <div class="stat-card stat-suspicious">
-                    <div class="stat-icon"><i class="bi bi-exclamation-triangle"></i></div>
-                    <div class="stat-number">{{ suspicious_count }}</div>
-                    <div class="stat-label">Suspicious ({{ suspicious_pct }}%)</div>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
                 <div class="stat-card stat-fake">
                     <div class="stat-icon"><i class="bi bi-x-circle"></i></div>
                     <div class="stat-number">{{ fake_count }}</div>
                     <div class="stat-label">Likely Fake ({{ fake_pct }}%)</div>
+                </div>
+            </div>
+            <!-- Expected to be the biggest number of the three. The reading
+                 model only reports on about a third of unknown articles; on the
+                 rest it declines to guess. A large count here is the system
+                 working as designed, not a fault. -->
+            <div class="col-6 col-md-3">
+                <div class="stat-card stat-unsure">
+                    <div class="stat-icon"><i class="bi bi-question-circle"></i></div>
+                    <div class="stat-number">{{ unsure_count }}</div>
+                    <div class="stat-label">Not Sure ({{ unsure_pct }}%)</div>
                 </div>
             </div>
         </div>
@@ -92,10 +96,10 @@ Chart data is fetched via JavaScript from the /api/dashboard-data/ endpoint.
                 <div class="card chart-card h-100">
                     <div class="card-body">
                         <h5 class="fw-bold mb-3">
-                            <i class="bi bi-bar-chart me-2"></i>Most Common Fake Keywords
+                            <i class="bi bi-bar-chart me-2"></i>How Verdicts Were Reached
                         </h5>
                         <div class="chart-container">
-                            <canvas id="barChart"></canvas>
+                            <canvas id="methodChart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -117,7 +121,8 @@ Chart data is fetched via JavaScript from the /api/dashboard-data/ endpoint.
                                 <th>#</th>
                                 <th>Headline</th>
                                 <th>Result</th>
-                                <th>Score</th>
+                                <th>Confidence</th>
+                                <th>Method</th>
                                 <th>Date</th>
                                 <th>Action</th>
                             </tr>
@@ -130,13 +135,27 @@ Chart data is fetched via JavaScript from the /api/dashboard-data/ endpoint.
                                 <td>
                                     {% if item.result_label == 'Likely Real' %}
                                         <span class="badge bg-success">✅ {{ item.result_label }}</span>
-                                    {% elif item.result_label == 'Suspicious' %}
-                                        <span class="badge bg-warning text-dark">⚠️ {{ item.result_label }}</span>
+                                    {% elif item.result_label == 'Not Sure' %}
+                                        <span class="badge bg-secondary">🤷 {{ item.result_label }}</span>
                                     {% else %}
                                         <span class="badge bg-danger">❌ {{ item.result_label }}</span>
                                     {% endif %}
                                 </td>
-                                <td><strong>{{ item.score }}</strong></td>
+                                <td>
+                                    {% if item.confidence %}<strong>{{ item.confidence }}%</strong>
+                                    {% else %}<span class="text-muted">—</span>{% endif %}
+                                </td>
+                                <td>
+                                    {% if item.method == 'database' %}
+                                        <span class="badge bg-info text-dark">Database</span>
+                                    {% elif item.method == 'reading_model' %}
+                                        <span class="badge bg-primary">Reading Model</span>
+                                    {% elif item.method == 'ml_prediction' %}
+                                        <span class="badge bg-warning text-dark">Word-Counter</span>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ item.analyzed_at|date:"M j, Y" }}</td>
                                 <td>
                                     <a href="{% url 'result' item.id %}" class="btn btn-sm btn-outline-primary">
@@ -167,8 +186,9 @@ Chart data is fetched via JavaScript from the /api/dashboard-data/ endpoint.
  * ================
  * We fetch data from our Django API endpoint (/api/dashboard-data/)
  * and render two charts using Chart.js:
- *   1. Pie Chart — shows distribution of Real/Suspicious/Fake
- *   2. Bar Chart — shows most common fake keywords detected
+ *   1. Pie Chart — shows distribution of Real/Fake
+ *   2. Bar Chart — shows how many verdicts came from the fact-check database
+ *                  vs. the ML model
  */
 
 // Fetch chart data from our API
@@ -185,8 +205,8 @@ fetch("{% url 'dashboard_data' %}")
                     data: data.pie_data.counts,
                     backgroundColor: [
                         '#198754',  // Green for Real
-                        '#ffc107',  // Yellow for Suspicious
                         '#dc3545',  // Red for Fake
+                        '#64748b',  // Neutral slate for Not Sure — no accusation
                     ],
                     borderWidth: 3,
                     borderColor: '#fff',
@@ -204,40 +224,41 @@ fetch("{% url 'dashboard_data' %}")
             }
         });
 
-        // ---- BAR CHART ----
-        if (data.bar_data.labels.length > 0) {
-            const barCtx = document.getElementById('barChart').getContext('2d');
-            new Chart(barCtx, {
-                type: 'bar',
-                data: {
-                    labels: data.bar_data.labels,
-                    datasets: [{
-                        label: 'Times Detected',
-                        data: data.bar_data.counts,
-                        backgroundColor: 'rgba(220, 53, 69, 0.7)',
-                        borderColor: '#dc3545',
-                        borderWidth: 1,
-                        borderRadius: 6,
-                    }]
+        // ---- METHOD BAR CHART ----
+        const methodCtx = document.getElementById('methodChart').getContext('2d');
+        new Chart(methodCtx, {
+            type: 'bar',
+            data: {
+                labels: data.method_data.labels,
+                datasets: [{
+                    label: 'Verdicts',
+                    data: data.method_data.counts,
+                    backgroundColor: [
+                        'rgba(13, 202, 240, 0.7)',   // Database match
+                        'rgba(108, 117, 125, 0.7)',  // AI prediction
+                    ],
+                    borderColor: ['#0dcaf0', '#6c757d'],
+                    borderWidth: 1,
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { stepSize: 1, precision: 0 }
                     },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: { stepSize: 1 }
-                        },
-                        x: {
-                            ticks: { font: { size: 11 } }
-                        }
+                    x: {
+                        ticks: { font: { size: 12 } }
                     }
                 }
-            });
-        }
+            }
+        });
     })
     .catch(error => {
         console.error('Error loading chart data:', error);
