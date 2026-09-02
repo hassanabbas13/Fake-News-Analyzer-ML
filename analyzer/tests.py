@@ -224,7 +224,11 @@ class AnalysisEngineTests(KnownArticleMixin, TestCase):
         """
         result = analyze_text(
             "Scientists confirm pizza cures cancer",
-            "A study from an unknown university claims pizza is the ultimate cure.",
+            "A study from an unknown university claims that pizza is the ultimate "
+            "cure for every known disease. The researchers said they had tested "
+            "the theory on a group of volunteers over several months and found "
+            "that all of them reported feeling much better afterwards, according "
+            "to a statement released on Tuesday by the institute.",
         )
 
         self.assertIn(result['method'], ('reading_model', 'ml_prediction'))
@@ -245,9 +249,25 @@ class AnalysisEngineTests(KnownArticleMixin, TestCase):
         if _load_reading_model() is None:
             self.skipTest('reading model not available')
 
-        for text in ("an entirely unseen headline about nothing in particular",
-                     "Central bank holds benchmark interest rate steady at 4.5 percent",
-                     "SHOCKING one weird trick doctors HATE cures everything instantly"):
+        # Long enough for the model to actually read. A separate test covers
+        # what happens below that length, which is a different question: this one
+        # is about never going silent on text it CAN read.
+        for text in (
+            "An entirely unseen headline about nothing in particular. The report "
+            "said that officials had met on Tuesday to discuss the matter and "
+            "would publish their findings at some point in the coming weeks, "
+            "according to two people with knowledge of the discussions.",
+
+            "Central bank holds benchmark interest rate steady at 4.5 percent. "
+            "Policymakers voted seven to two to keep the current range in place, "
+            "citing persistent inflation and a labour market that has begun to "
+            "cool over the past several months.",
+
+            "SHOCKING one weird trick doctors HATE cures everything instantly. "
+            "The mainstream media will never tell you about this because they are "
+            "paid by the same people who profit from keeping you sick, and that "
+            "is why you need to share this with everyone you know right now.",
+        ):
             result = analyze_text(text)
             self.assertIn(result['label'], ('Likely Fake', 'Likely Real'))
             self.assertIsNotNone(result['confidence'])
@@ -326,7 +346,11 @@ class AnalyzeViewTests(KnownArticleMixin, TestCase):
 
     def test_long_single_line_paste_is_not_lost(self):
         """Headline column caps at 500 chars — the full text must survive."""
-        long_text = 'lorem ipsum dolor sit amet ' * 40  # ~1080 chars, no newline
+        # Real English, because the form now rejects text that is not. The old
+        # fixture was 'lorem ipsum' repeated, which is Latin and gets turned away
+        # before it ever reaches the truncation this test is about.
+        long_text = ('The central bank left its benchmark interest rate unchanged '
+                     'on Wednesday. ') * 14  # ~1000 chars, no newline
         self.client.post(reverse('analyze'), {'news_content': long_text})
 
         analysis = NewsAnalysis.objects.get()
@@ -617,3 +641,308 @@ class LoaderTopUpTests(TestCase):
         self.assertEqual(saved.headline_key, 'new one')
         self.assertEqual(best_match('NEW ONE!'), saved)
 
+
+# ============================================================================
+# THE WEB CHECK — WHEN IT RUNS, AND WHAT THE PAGE SAYS
+# ============================================================================
+#
+# Two separate risks are covered here.
+#
+# The first is spending money. The search is only worth an API call inside the
+# band where the reading model is unreliable, which tune_cutoff.py measures and
+# records in cutoff.json. A regression that fired it on every article would not
+# break any output — it would quietly burn the daily free allowance and slow
+# every page, which is exactly the kind of fault nobody notices until it bites.
+#
+# The second is misleading the reader. 'nothing' and 'unavailable' look similar
+# in code and mean opposite things: one is evidence against the article, the
+# other is no evidence at all. The page must never dress a failed check up as a
+# finding, so each state is asserted separately.
+
+FOUND_REAL = {
+    'status': 'found', 'verdict': 'REAL', 'confidence': 'high',
+    'summary': 'Several outlets report this happened.',
+    'reporting': ['Reuters', 'AP', 'BBC'], 'debunking': [],
+    'factcheck_rating': None,
+    'sources': [{'title': 'bbc.co.uk', 'url': 'https://example.com/story'}],
+    'queries': ['probe'], 'error': None, 'elapsed': 5.0,
+}
+FOUND_FAKE = dict(FOUND_REAL, verdict='FAKE', reporting=[],
+                  debunking=['Snopes', 'PolitiFact'],
+                  factcheck_rating='False',
+                  summary='Fact-checkers rated this false.')
+FOUND_NOTHING = dict(FOUND_REAL, status='nothing', verdict='UNCLEAR',
+                     reporting=[], debunking=[], summary='')
+UNAVAILABLE = dict(FOUND_REAL, status='unavailable', verdict=None,
+                   reporting=[], debunking=[], sources=[], summary='',
+                   error='daily free search allowance used up')
+
+
+class ShouldCheckTests(TestCase):
+    """Only spend an API call where the model has been measured unreliable."""
+
+    def setUp(self):
+        from . import web_check
+        self.web_check = web_check
+        self._key = web_check._read_key
+        web_check._read_key = lambda: 'test-key'
+        self._band = web_check.unsure_band
+        web_check.unsure_band = lambda: (0.01, 0.99)
+
+    def tearDown(self):
+        self.web_check._read_key = self._key
+        self.web_check.unsure_band = self._band
+
+    def test_fires_inside_the_unsure_band(self):
+        for score in (0.02, 0.4, 0.5, 0.97):
+            self.assertTrue(self.web_check.should_check(score), score)
+
+    def test_stays_quiet_where_the_model_is_confident(self):
+        for score in (0.0, 0.001, 0.005, 0.995, 0.9999, 1.0):
+            self.assertFalse(self.web_check.should_check(score), score)
+
+    def test_no_key_means_no_call(self):
+        self.web_check._read_key = lambda: None
+        self.assertFalse(self.web_check.should_check(0.4))
+
+    def test_no_measured_band_means_no_call(self):
+        """A missing band is not licence to guess when a search is needed."""
+        self.web_check.unsure_band = lambda: None
+        self.assertFalse(self.web_check.should_check(0.4))
+
+    def test_missing_score_means_no_call(self):
+        self.assertFalse(self.web_check.should_check(None))
+
+
+class WebCheckFailureTests(TestCase):
+    """Every failure returns a renderable result. None of them raise."""
+
+    def setUp(self):
+        from . import web_check
+        self.web_check = web_check
+        self._key = web_check._read_key
+
+    def tearDown(self):
+        self.web_check._read_key = self._key
+
+    def test_missing_key_is_unavailable(self):
+        self.web_check._read_key = lambda: None
+        result = self.web_check.check_online('Some headline')
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertIsNone(result['verdict'])
+        self.assertIn('GEMINI_API_KEY', result['error'])
+
+    def test_empty_headline_is_unavailable(self):
+        self.web_check._read_key = lambda: 'test-key'
+        result = self.web_check.check_online('')
+        self.assertEqual(result['status'], 'unavailable')
+
+    def test_network_failure_is_unavailable_not_an_exception(self):
+        self.web_check._read_key = lambda: 'test-key'
+        original = self.web_check.urllib.request.urlopen
+
+        def explode(*args, **kwargs):
+            raise OSError('network is down')
+
+        self.web_check.urllib.request.urlopen = explode
+        try:
+            result = self.web_check.check_online('Some headline')
+        finally:
+            self.web_check.urllib.request.urlopen = original
+
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertEqual(result['error'], 'OSError')
+
+    def test_garbled_reply_keeps_the_sources_it_did_get(self):
+        """
+        A reply that is not the JSON we asked for must not throw the grounding
+        sources away. Those are the pages actually consulted, so they are the
+        part of the answer that cannot have been invented.
+        """
+        reply = {'candidates': [{
+            'content': {'parts': [{'text': 'Sorry, I cannot comply.'}]},
+            'groundingMetadata': {
+                'groundingChunks': [
+                    {'web': {'uri': 'https://example.com/a',
+                             'title': 'example.com'}}],
+                'webSearchQueries': ['something'],
+            },
+        }]}
+        result = self.web_check._read_reply(reply, 1.0)
+
+        self.assertEqual(len(result['sources']), 1)
+        self.assertEqual(result['verdict'], 'UNCLEAR')
+        self.assertIn('JSON', result['error'])
+
+
+class WebCheckDisplayTests(TestCase):
+    """What the reader is actually told, in each of the five states."""
+
+    def _page(self, label, web):
+        analysis = NewsAnalysis.objects.create(
+            headline='Display probe', article_text='body', score=50,
+            result_label=label, explanation='probe', confidence=86.9,
+            method='reading_model', web_check=web)
+        return self.client.get(reverse('result', args=[analysis.id]))
+
+    def test_agreement_shows_the_evidence(self):
+        response = self._page('Likely Fake', FOUND_FAKE)
+        self.assertContains(response, 'What We Found Online')
+        self.assertContains(response, 'Snopes')
+        self.assertNotContains(response, 'These two disagree')
+
+    def test_model_says_fake_but_web_says_real_is_flagged(self):
+        response = self._page('Likely Fake', FOUND_REAL)
+        self.assertContains(response, 'These two disagree')
+        self.assertContains(response, 'Reuters')
+
+    def test_model_says_real_but_web_says_fake_is_flagged(self):
+        response = self._page('Likely Real', FOUND_FAKE)
+        self.assertContains(response, 'These two disagree')
+
+    def test_found_nothing_reads_as_suspicion_not_proof(self):
+        response = self._page('Likely Fake', FOUND_NOTHING)
+        self.assertContains(response, 'No coverage found')
+        self.assertContains(response, 'not proof')
+
+    def test_a_failed_check_is_not_presented_as_a_finding(self):
+        """
+        The important one. 'We could not check' must never read like 'we checked
+        and found nothing', because the second is evidence against the article
+        and the first is evidence about nothing at all.
+        """
+        response = self._page('Likely Fake', UNAVAILABLE)
+        self.assertContains(response, 'Could not check')
+        self.assertNotContains(response, 'No coverage found')
+        self.assertNotContains(response, 'These two disagree')
+
+    def test_no_section_at_all_when_the_search_never_ran(self):
+        response = self._page('Likely Fake', None)
+        self.assertNotContains(response, 'What We Found Online')
+
+
+# ============================================================================
+# WHAT WE REFUSE TO JUDGE
+# ============================================================================
+#
+# Measured on 2 Sep 2026, the reading model answers everything it is shown,
+# including things it cannot read:
+#
+#   the same story in Urdu   Likely Fake   0.9866
+#   Spanish                  Likely Fake   0.3498
+#   random symbols           Likely Fake   0.9950
+#   keyboard mash            Likely Fake   0.9998
+#   the single word "news"   Likely Fake   0.9980
+#
+# Every one of those would have been printed next to "right 86.9% of the time",
+# a figure measured on English news articles. Refusing is the honest answer, and
+# these tests exist so a later change cannot quietly start guessing again.
+
+class InputCheckTests(TestCase):
+    """The rules themselves, without the form or the model in the way."""
+
+    def setUp(self):
+        from .input_check import check_input, check_long_enough
+        self.check_input = check_input
+        self.check_long_enough = check_long_enough
+
+    def test_real_english_article_is_accepted(self):
+        text = ("Central bank holds interest rates steady amid inflation concerns. "
+                "The central bank left its benchmark interest rate unchanged on "
+                "Wednesday, citing persistent inflation and a cooling labour market. "
+                "Policymakers voted seven to two to maintain the current range.")
+        self.assertIsNone(self.check_input(text))
+        self.assertIsNone(self.check_long_enough(text))
+
+    def test_non_latin_script_is_refused(self):
+        urdu = ("مرکزی بینک نے شرح سود برقرار رکھی۔ مرکزی بینک نے بدھ کو اپنی بنیادی "
+                "شرح سود میں کوئی تبدیلی نہیں کی، مسلسل مہنگائی اور سست ہوتی لیبر "
+                "مارکیٹ کا حوالہ دیتے ہوئے۔ پالیسی سازوں نے سات کے مقابلے دو ووٹوں "
+                "سے موجودہ حد برقرار رکھنے کا فیصلہ کیا جو توقعات کے مطابق تھا۔")
+        problem = self.check_input(urdu)
+        self.assertIsNotNone(problem)
+        self.assertEqual(problem.code, 'not_english')
+
+    def test_latin_script_but_not_english_is_refused(self):
+        """Spanish passes the alphabet check, so the word check has to catch it."""
+        spanish = ("El banco central mantuvo sin cambios su tasa de referencia el "
+                   "miercoles citando la inflacion persistente y un mercado laboral "
+                   "en proceso de enfriamiento. Los responsables de politica "
+                   "monetaria votaron siete a dos para mantener el rango actual.")
+        problem = self.check_input(spanish)
+        self.assertIsNotNone(problem)
+        self.assertEqual(problem.code, 'not_english_prose')
+
+    def test_keyboard_mash_is_refused(self):
+        mash = ("asdkjfh alskdjfh alskdjfh qwoieuryt zxcmvnb asldkfj qpwoeiru "
+                "zmxncbv alsdkjfh qweruiop mnbvcxz lkjhgfds poiuytre wqasdfgh "
+                "zxcvbnml plokijuh ygtfrdes wsxedcrf vgybhunj mikolp qazwsxed "
+                "rfvtgbyh njmikolp qwertyui asdfghjk zxcvbnmq")
+        problem = self.check_input(mash)
+        self.assertIsNotNone(problem)
+        self.assertEqual(problem.code, 'not_english_prose')
+
+    def test_over_the_word_limit_is_refused(self):
+        from .input_check import MAX_WORDS
+        problem = self.check_input('the quick brown fox jumps over ' * 100)
+        self.assertIsNotNone(problem)
+        self.assertEqual(problem.code, 'too_long')
+        self.assertIn(str(MAX_WORDS), problem.message)
+
+    def test_a_bare_headline_is_still_accepted_by_the_form(self):
+        """
+        The important one. A four-word headline must NOT be turned away, because
+        Step 1 looks headlines up in the fact-check table and answers from the
+        record — the most reliable answer this app gives. Only the model needs a
+        minimum, and that is checked later.
+        """
+        self.assertIsNone(self.check_input('Trump wins Iowa caucus'))
+        self.assertIsNotNone(self.check_long_enough('Trump wins Iowa caucus'))
+
+
+class InputCheckFormTests(TestCase):
+    """The same rules as the user meets them."""
+
+    def _post(self, text):
+        return self.client.post(reverse('analyze'), {'news_content': text})
+
+    def test_urdu_is_rejected_with_an_explanation(self):
+        response = self._post("مرکزی بینک نے شرح سود برقرار رکھی۔ مرکزی بینک نے بدھ "
+                              "کو اپنی بنیادی شرح سود میں کوئی تبدیلی نہیں کی۔")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'only read English')
+        self.assertEqual(NewsAnalysis.objects.count(), 0)
+
+    def test_over_the_limit_is_rejected_with_an_explanation(self):
+        response = self._post('the quick brown fox jumps over ' * 100)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'the limit is')
+        self.assertEqual(NewsAnalysis.objects.count(), 0)
+
+    def test_nothing_is_saved_when_input_is_refused(self):
+        """A refusal must not leave a row behind claiming a verdict."""
+        self._post('😀🎉🚀💀🔥👍🌟⚡ ' * 8)
+        self.assertEqual(NewsAnalysis.objects.count(), 0)
+
+
+class TooShortForModelTests(KnownArticleMixin, TestCase):
+    """Short unknown text gets 'Not Sure', never a confident guess."""
+
+    def test_short_unknown_text_is_not_guessed_at(self):
+        result = analyze_text('Some unseen headline nobody has indexed')
+
+        self.assertEqual(result['label'], 'Not Sure')
+        self.assertEqual(result['method'], 'too_short')
+        self.assertIsNone(result['confidence'])
+        self.assertIn('25 words', result['explanation'])
+
+    def test_a_known_short_headline_still_answers_from_the_database(self):
+        """
+        The minimum must not block Step 1. This headline is four words long and
+        in the fact-check table, so it gets a definitive answer with no model
+        involved — that path is more reliable than anything the model does.
+        """
+        result = analyze_text(KNOWN_FAKE)
+
+        self.assertEqual(result['method'], 'database')
+        self.assertEqual(result['label'], 'Likely Fake')

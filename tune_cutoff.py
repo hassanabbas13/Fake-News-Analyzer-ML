@@ -91,6 +91,32 @@ FLAG_PRECISION_FLOOR = 0.75
 # so such a band is rejected however good it looks.
 MIN_FLAGGED = 50
 
+# The widest slice of articles we are willing to send to an outside web search.
+# Every article inside the "unsure" band costs one API call and the free Gemini
+# allowance is 500 grounded searches a day, so this is a spending limit as much
+# as a statistical one.
+UNSURE_MAX_COVERAGE = 0.20
+
+# Gemini's free grounded-search allowance per day, as documented on
+# 24 Aug 2026. Only used to print a rough capacity estimate.
+FREE_SEARCHES_PER_DAY = 500
+
+# How reliable the verdict has to be before we are willing to let it stand
+# alone. Below this, the app should go and look the story up instead of leaning
+# on a guess. A product decision, not a measurement: 75% means we accept being
+# wrong 1 time in 4 without seeking a second opinion, which is the same floor
+# FLAG_PRECISION_FLOOR uses for a different question.
+UNSURE_ACCURACY_FLOOR = 75.0
+
+# Candidate unsure bands, as (low, high) score pairs. Deliberately a short fixed
+# list rather than a fine search: this picks ONE band, and we would rather it be
+# a round explicable number than the winner of a thousand-way contest fitted to
+# noise in a few dozen articles.
+UNSURE_CANDIDATES = [
+    (0.01, 0.99), (0.05, 0.99), (0.05, 0.95),
+    (0.10, 0.90), (0.20, 0.80), (0.30, 0.70),
+]
+
 
 # ============================================================================
 # STEP 1 — GET THE MODEL'S SCORE FOR EVERY McINTIRE ARTICLE
@@ -305,6 +331,83 @@ def describe_band(scores, truth, threshold):
     }
 
 
+def find_unsure_band(scores, truth, cutoff):
+    """
+    Find the score range where this model's verdict is not worth trusting.
+
+    Why this exists: the model is bimodal. It puts most articles hard against 0
+    or hard against 1 and is right about 92% of the time on those, but the
+    handful landing in the middle it gets barely better than a coin flip. Those
+    middle articles are exactly the ones worth spending an outside web search
+    on; the rest are exactly the ones not to waste an API call on.
+
+    The band is MEASURED rather than assumed, for the same reason the cutoff is:
+    it belongs to this particular set of weights. Retrain and the middle moves.
+    A band typed into the app by hand would quietly go stale, and the app would
+    start paying for searches on articles it already knew the answer to.
+
+    Chosen as the WIDEST band whose verdicts are still under
+    UNSURE_ACCURACY_FLOOR reliable — i.e. help as many doubtful articles as we
+    can, while only calling doubtful what really is.
+
+    An earlier version maximised the gap between inside and outside accuracy
+    instead. That sounds right and is not: it rewards the narrowest, purest band,
+    so it picked a range covering 3% of articles and left the other two thirds of
+    the unreliable ones unhelped. Optimise for how many users get a better
+    answer, not for how bad the worst slice looks. The free allowance is 500
+    searches a day and even the widest candidate here needs about 150 per 1,000
+    articles, so coverage is what is scarce, not budget.
+
+    Returns None if nothing qualifies, which is the honest answer for a model
+    that is reliable everywhere.
+    """
+    said_fake = (scores >= cutoff).astype(int)
+    correct = said_fake == truth
+
+    best = None
+    for low, high in UNSURE_CANDIDATES:
+        inside = (scores > low) & (scores < high)
+
+        # Too few articles to conclude anything, or so many that "unsure" would
+        # be the normal case and nearly every analysis would cost a search.
+        if inside.sum() < MIN_FLAGGED or inside.mean() > UNSURE_MAX_COVERAGE:
+            continue
+
+        in_acc = float(correct[inside].mean()) * 100
+        out_acc = float(correct[~inside].mean()) * 100
+
+        # Not an unsure band if the verdict holds up inside it.
+        if in_acc >= UNSURE_ACCURACY_FLOOR:
+            continue
+
+        # Nor if the model is no better outside than in — then the band is not
+        # isolating anything, it is just a slice of a uniformly weak model.
+        if out_acc <= in_acc:
+            continue
+
+        coverage = float(inside.mean())
+        if best is None or coverage > best['coverage_fraction']:
+            best = {'low': low, 'high': high, 'coverage_fraction': coverage,
+                    'accuracy_inside': in_acc, 'accuracy_outside': out_acc}
+    return best
+
+
+def describe_unsure_band(scores, truth, cutoff, band):
+    """The band's figures on the half that had no say in choosing it."""
+    said_fake = (scores >= cutoff).astype(int)
+    correct = said_fake == truth
+    inside = (scores > band['low']) & (scores < band['high'])
+    return {
+        'low': float(band['low']),
+        'high': float(band['high']),
+        'coverage': round(float(inside.mean()) * 100, 1),
+        'accuracy_inside': round(float(correct[inside].mean()) * 100, 1),
+        'accuracy_outside': round(float(correct[~inside].mean()) * 100, 1),
+        'searches_per_1000_articles': int(round(float(inside.mean()) * 1000)),
+        'measured_on': int(len(scores)),
+    }
+
+
 def describe_verdict(scores, truth, cutoff):
     """
     How the app performs when it is required to answer about EVERY article.
@@ -460,6 +563,42 @@ def run(retune):
               f"{band['precision']}% of the time, but would\n   answer about just "
               f"{band['coverage']}% of articles. Not what the app does.)")
 
+    # ---- where the verdict is not worth trusting ----
+    # Chosen on half A, reported on half B, the same discipline as the cutoff.
+    unsure_choice = find_unsure_band(scores_a, truth_a, best['cutoff'])
+    unsure = (describe_unsure_band(scores_b, truth_b, best['cutoff'], unsure_choice)
+              if unsure_choice else None)
+
+    print()
+    print("=" * 68)
+    print("  WHERE THE MODEL IS NOT WORTH TRUSTING")
+    print("=" * 68)
+    if unsure is None:
+        print(f"  No band qualifies: nowhere is this model's verdict worse than")
+        print(f"  {UNSURE_ACCURACY_FLOOR:.0f}% reliable. An outside web search has nothing "
+              f"obvious to be")
+        print("  called in for.")
+    else:
+        print(f"  scores between {unsure['low']} and {unsure['high']}")
+        print()
+        print(f"  {'':22} {'articles':>9} {'verdict right':>14}")
+        print("  " + "-" * 48)
+        print(f"  {'inside the band':22} {unsure['coverage']:>8.1f}% "
+              f"{unsure['accuracy_inside']:>13.1f}%")
+        print(f"  {'outside it':22} {100 - unsure['coverage']:>8.1f}% "
+              f"{unsure['accuracy_outside']:>13.1f}%")
+        print()
+        print("  Inside that band the verdict is close to a coin flip, so it is")
+        print("  where an outside web search earns its keep. Outside it the model")
+        print("  already knows the answer and a search would be wasted money.")
+        print()
+        print(f"  Cost: about {unsure['searches_per_1000_articles']} searches per "
+              f"1,000 articles analysed.")
+        print(f"  Gemini's free allowance is {FREE_SEARCHES_PER_DAY} grounded "
+              f"searches a day, so")
+        daily = int(FREE_SEARCHES_PER_DAY / max(unsure['coverage'], 0.1) * 100)
+        print(f"  roughly {daily:,} articles a day before it runs out.")
+
     # ---- record the choice next to the model ----
     with open(CUTOFF_PATH, 'w', encoding='utf-8') as f:
         json.dump({
@@ -477,6 +616,13 @@ def run(retune):
             # Recorded but unused — see the comment above find_flag_band's call.
             'flag': band,
             'flag_precision_floor': FLAG_PRECISION_FLOOR,
+            # The score range where the verdict is barely better than a coin
+            # flip. analyzer/web_check.py reads this to decide when an outside
+            # web search is worth an API call. Re-measured on every run, so it
+            # follows the model instead of going stale.
+            'unsure_band': unsure,
+            'unsure_max_coverage': UNSURE_MAX_COVERAGE,
+            'unsure_accuracy_floor': UNSURE_ACCURACY_FLOOR,
         }, f, indent=2)
 
     print(f"\n  Written to {CUTOFF_PATH}")

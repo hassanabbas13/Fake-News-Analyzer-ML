@@ -104,6 +104,17 @@ class NewsAnalysis(models.Model):
     # KnownArticle on each reload, which would break or erase a real link.
     matched_headline = models.CharField(max_length=1000, blank=True, default='')
     matched_extract = models.TextField(blank=True, default='')
+
+    # What the web search found, when it ran. Stored as JSON rather than as a
+    # dozen columns because it is a whole shape -- verdict, outlets reporting,
+    # outlets debunking, links, why it failed -- and because that shape will
+    # change as web_check.py improves, which columns would make painful.
+    #
+    # Null means the search never ran: either the model was confident enough not
+    # to need it, or there was no API key. That is DIFFERENT from a stored result
+    # with status 'nothing', which means the search ran and found no coverage --
+    # weak evidence against the article. The template must not conflate them.
+    web_check = models.JSONField(null=True, blank=True)
     
     class Meta:
         ordering = ['-analyzed_at']

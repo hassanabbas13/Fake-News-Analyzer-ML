@@ -85,6 +85,9 @@ def analyze(request):
                 method=result.get('method'),
                 matched_headline=matched.headline if matched else '',
                 matched_extract=matched.article_text if matched else '',
+                # None when the search did not run at all, which the result page
+                # renders differently from "ran and found nothing".
+                web_check=result.get('web'),
             )
 
             # Step 4: Redirect to result page

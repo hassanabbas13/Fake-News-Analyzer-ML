@@ -3,37 +3,45 @@ analysis_engine.py — Hybrid Fake News Analyzer
 =================================================
 
 This is the MOST IMPORTANT file in the project.
-It uses a TWO-STEP hybrid approach to classify news:
+It classifies news in three steps:
 
   Step 1: Database Fact-Check
     Search our database of known articles.
     If the headline matches one exactly, return that dataset's label.
 
-  Step 2: The Reading Model (Fallback)
+  Step 2: The Reading Model
     If the headline is not in our database, a fine-tuned DistilBERT model reads
     the text and scores how fake it looks. Above the measured cutoff it says
     "Likely Fake", below it "Likely Real" — every article gets an answer.
 
+    Before that, input_check.check_long_enough() turns away anything too short
+    to read. The model has no way to say "that is not enough to go on": asked
+    about the single word "news" it answered 99.8% fake.
+
+  Step 3: The Web Search (only where Step 2 is unreliable)
+    web_check.py asks Gemini to search the web, but only for scores inside the
+    unsure band that tune_cutoff.py measured — see cutoff.json. Its answer is
+    shown BESIDE the verdict, never merged into it. Details in web_check.py.
+
 THE PERCENTAGE SHOWN IS NOT THE MODEL'S CONFIDENCE
 ---------------------------------------------------
 This matters more than anything else in this file. The model's own certainty is
-worthless: it routinely reports 99% while being wrong, and on the honest test it
-called 42% of fake articles definitely-real with over 95% confidence. Quoting
-that number would tell users the opposite of the truth.
+worthless: it routinely reports 99% while being wrong. Quoting that number would
+tell users the opposite of the truth.
 
 So what the app reports instead is the measured reliability of that KIND of
-verdict, from tune_cutoff.py:
+verdict, read live from reading_model/cutoff.json, which tune_cutoff.py writes.
+As of 20 August 2026 that is about 87% for "Likely Fake" and 90% for "Likely
+Real", from 3,160 articles in a collection the model never learned from.
 
-  when it says "Likely Fake"   it is right about 74% of the time
-  when it says "Likely Real"   it is right about 65% of the time
+Those two figures are quoted separately on purpose. A single overall accuracy
+would hide it whenever one direction becomes much less trustworthy than the
+other — which was true of every earlier model here, and could be true again.
 
-Those come from 3,160 articles in a collection the model never learned from.
-About half of them were fake, so a coin toss scores 50% — the "real" verdict is
-therefore a weak signal and the "fake" verdict a moderate one. Both are shown
-with their own figure attached so nobody mistakes one for the other.
-
-The two are quoted separately on purpose. A single overall accuracy (68%) would
-hide the fact that one direction is much more trustworthy than the other.
+Do not write either figure into this file. They are approximate here only to
+explain the idea; every number the app shows comes from cutoff.json at runtime.
+An earlier version of this docstring quoted 74% and 65%, and went on quoting
+them for two retrainings after they stopped being true.
 
 NOTE ON NUMBERS: nothing here hardcodes how big the database is or how accurate
 the model is. The article count is counted live from the database, the model's
@@ -54,6 +62,8 @@ import pickle
 
 from .text_cleaning import clean_article_text
 from .text_matching import normalize_headline
+from .input_check import check_long_enough
+from .web_check import check_online, should_check
 
 # ============================================================================
 # LOAD THE ML MODEL (loaded ONCE when Django starts, kept in memory)
@@ -361,6 +371,22 @@ def analyze_text(headline, article_text=""):
     # ------------------------------------------------------------------
     # STEP 2: The reading model (headline not found in database)
     # ------------------------------------------------------------------
+    # Before spending anything on it: is there enough text to read? The model
+    # has no way to say "that is not enough to go on" — asked about the single
+    # word "news" it answered 99.8% fake — and the result page would print a
+    # measured reliability figure next to that guess. Refusing is the honest
+    # answer, and it has to happen HERE rather than in the form, because a bare
+    # headline is a fine thing to paste when Step 1 can look it up.
+    short = check_long_enough(f"{headline} {article_text}")
+    if short:
+        return {
+            'score': 50,
+            'label': 'Not Sure',
+            'confidence': None,
+            'method': 'too_short',
+            'explanation': short.message,
+        }
+
     # Combine headline and article text — the model was trained on the two
     # joined, so it must be asked the same way.
     full_text = f"{headline} {article_text}".strip()
@@ -392,12 +418,21 @@ def analyze_text(headline, article_text=""):
         # 'confidence' carries how often THIS KIND of verdict turns out correct,
         # never the model's own certainty. See this module's docstring for why
         # that distinction is the whole point.
+        # Which verdict is the weaker one is WORKED OUT, not assumed. It used to
+        # be written in as a fact about "Likely Real", which was true of the
+        # model of 18 Aug and is false of this one: real verdicts now hold up
+        # better than fake ones. A claim about the model's own reliability has to
+        # come from the measurements, or it rots the moment you retrain.
+        weaker = ('real' if verdict['real_precision'] < verdict['fake_precision']
+                  else 'fake')
+
         if says_fake:
             label = 'Likely Fake'
             reliability = verdict['fake_precision']
             wrong_share = round(100 - reliability, 1)
             caveat = (
-                f"So roughly {wrong_share}% of the articles it calls fake are "
+                f"{'This is the weaker of its two verdicts: ' if weaker == 'fake' else 'So '}"
+                f"roughly {wrong_share}% of the articles it calls fake are "
                 f"genuinely real news — treat this as a reason to check further, "
                 f"not a conclusion."
             )
@@ -406,12 +441,12 @@ def analyze_text(headline, article_text=""):
             reliability = verdict['real_precision']
             wrong_share = round(100 - reliability, 1)
             caveat = (
-                f"This is the weaker of its two verdicts: about {wrong_share}% of "
-                f"the articles it calls real are actually fake, so this is not "
-                f"clearance to trust the story. Verify it yourself."
+                f"{'This is the weaker of its two verdicts: about ' if weaker == 'real' else 'About '}"
+                f"{wrong_share}% of the articles it calls real are actually fake, "
+                f"so this is not clearance to trust the story. Verify it yourself."
             )
 
-        return {
+        result = {
             'score': score,
             'label': label,
             'confidence': reliability,
@@ -425,6 +460,30 @@ def analyze_text(headline, article_text=""):
                 f"{_reading_model_evidence(reading)}"
             ),
         }
+
+        # ------------------------------------------------------------------
+        # STEP 3: ask the web, but ONLY where the model is unreliable
+        # ------------------------------------------------------------------
+        # should_check() consults the unsure band that tune_cutoff.py measured:
+        # for this model, scores between 0.01 and 0.99, about 15% of articles,
+        # where the verdict is right only 61% of the time against 93% outside.
+        # On the confident 85% a search would cost an API call to be told what
+        # the model already knew.
+        #
+        # This is deliberately ADDITIVE. The verdict, the label and the
+        # reliability figure above are untouched by whatever comes back. Those
+        # numbers are measured on 3,160 articles with known answers; the web
+        # check is measured on nothing, and letting it quietly overwrite a
+        # measured verdict would throw away the one thing that makes this app
+        # honest. The template shows both and says so when they disagree.
+        #
+        # check_online() never raises. No key, no network, a timeout or an
+        # exhausted quota all come back as status 'unavailable', and the page
+        # still renders this verdict.
+        if should_check(fake_score):
+            result['web'] = check_online(headline, article_text)
+
+        return result
 
     # ------------------------------------------------------------------
     # STEP 2 FALLBACK: the old word-counter, if the reading model is unusable

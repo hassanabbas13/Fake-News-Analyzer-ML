@@ -120,6 +120,122 @@ stale the moment the data or model changes.
                     </div>
                 </div>
 
+                {# ------------------------------------------------------------
+                   WHAT THE WEB SAYS
+
+                   Shown as a SEPARATE answer, never merged into the verdict
+                   above. The verdict's percentage is measured on 3,160 articles
+                   with known answers; this is measured on nothing, so blending
+                   them would produce a number with nothing behind it. Two
+                   answers side by side, and when they disagree the page says so
+                   rather than quietly picking one.
+
+                   Only present when the reading model was unsure -- see
+                   web_check.should_check(). Three states, deliberately worded
+                   differently:
+                     found       we searched and found coverage
+                     nothing     we searched and found none  (evidence AGAINST)
+                     unavailable we could not search          (no evidence at all)
+                   Collapsing the last two would show the reader a damning
+                   signal we never actually measured.
+                   ------------------------------------------------------------ #}
+                {% if analysis.web_check %}
+                {% with web=analysis.web_check %}
+                <div class="card mt-4 {% if web.status == 'found' %}border-primary{% else %}border-secondary{% endif %}">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">
+                            <i class="bi bi-globe2 me-2"></i>What We Found Online
+                        </h5>
+
+                        {% if web.status == 'unavailable' %}
+                            <div class="alert alert-secondary mb-0">
+                                <i class="bi bi-wifi-off me-2"></i>
+                                <strong>Could not check.</strong>
+                                We tried to look this story up but the search did not
+                                complete{% if web.error %} ({{ web.error }}){% endif %}.
+                                This is <em>not</em> evidence either way — it only means
+                                the check failed. The verdict above stands on its own.
+                            </div>
+
+                        {% elif web.status == 'nothing' %}
+                            <div class="alert alert-warning mb-0">
+                                <i class="bi bi-search me-2"></i>
+                                <strong>No coverage found.</strong>
+                                We searched and could not find any news organisation
+                                reporting this story. That is a reason for suspicion, but
+                                not proof — genuinely new stories are sometimes carried by
+                                only one outlet at first.
+                            </div>
+
+                        {% else %}
+                            {% if web.summary %}
+                                <p class="mb-3">{{ web.summary }}</p>
+                            {% endif %}
+
+                            {% if web.factcheck_rating %}
+                                <div class="alert alert-dark py-2 mb-3">
+                                    <i class="bi bi-patch-check me-2"></i>
+                                    A fact-checker rated this:
+                                    <strong>{{ web.factcheck_rating }}</strong>
+                                </div>
+                            {% endif %}
+
+                            {% if web.reporting %}
+                                <p class="mb-1"><strong>Reporting this story:</strong></p>
+                                <p class="text-muted mb-3">{{ web.reporting|join:" · " }}</p>
+                            {% endif %}
+
+                            {% if web.debunking %}
+                                <p class="mb-1">
+                                    <strong>Calling it false or misleading:</strong>
+                                </p>
+                                <p class="text-muted mb-3">{{ web.debunking|join:" · " }}</p>
+                            {% endif %}
+
+                            {# The disagreement notice. This is the most useful thing
+                               on the page when it appears, so it is not buried. #}
+                            {% if web.verdict == 'REAL' and analysis.result_label == 'Likely Fake' %}
+                                <div class="alert alert-warning mb-3">
+                                    <i class="bi bi-exclamation-diamond me-2"></i>
+                                    <strong>These two disagree.</strong>
+                                    Our reader called this fake, but real news
+                                    organisations appear to be carrying the story. The
+                                    links below are stronger evidence than our guess —
+                                    read them before believing the verdict above.
+                                </div>
+                            {% elif web.verdict == 'FAKE' and analysis.result_label == 'Likely Real' %}
+                                <div class="alert alert-danger mb-3">
+                                    <i class="bi bi-exclamation-diamond me-2"></i>
+                                    <strong>These two disagree.</strong>
+                                    Our reader called this real, but what we found online
+                                    suggests it is false. Trust the links below over the
+                                    verdict above.
+                                </div>
+                            {% endif %}
+
+                            {% if web.sources %}
+                                <p class="mb-1"><strong>Pages we read:</strong></p>
+                                <ul class="small mb-0">
+                                    {% for source in web.sources %}
+                                    <li>
+                                        <a href="{{ source.url }}" target="_blank"
+                                           rel="noopener noreferrer">{{ source.title }}</a>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+                        {% endif %}
+
+                        <p class="text-muted small mt-3 mb-0">
+                            This search ran because our reader was unsure about this
+                            article. It is a second opinion gathered from the web, not a
+                            measured figure like the percentage above.
+                        </p>
+                    </div>
+                </div>
+                {% endwith %}
+                {% endif %}
+
                 <!-- The article we matched, so the reader can judge it themselves
                      instead of only being handed a verdict. Only present when
                      Step 1 found something. -->
