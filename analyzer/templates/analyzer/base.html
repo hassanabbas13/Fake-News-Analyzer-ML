@@ -1,74 +1,79 @@
-{# base.html — Base Template. This is the skeleton that all other pages extend. #}
-{% load static %}
+{% load static %}{% comment %}
+base.html — the skeleton every page extends
+===========================================
+Neo-brutalism: hard black borders, offset shadows, buttons that press down.
+The colours mean things — see the note at the top of static/analyzer/style.css
+before adding any.
+
+Bootstrap's stylesheet is gone. It was fighting the flat borders and hard
+shadows on every element, and the layouts here are small enough to write
+directly. Bootstrap ICONS stay: that is a font file, not a layout system, and
+the templates use `bi bi-*` throughout.
+
+Each page marks its own nav tab by filling one of the nav_* blocks with
+"active" — a plain string, so nothing has to be passed from views.py.
+
+Note the comment syntax. {# #} in Django is SINGLE-LINE ONLY: spread it over
+two lines and the template engine stops treating it as a comment and prints it
+into the page. Multi-line notes therefore use {% comment %}, here and in every
+other template in this directory.
+{% endcomment %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Fake News Analyzer - A rule-based text classification system that detects fake news using keyword scoring">
+    <meta name="description" content="Fake News Analyzer — checks a headline against a fact-check database, then reads the writing with a trained model, and asks the web for a second opinion when it is unsure.">
+    <meta name="theme-color" content="#F5F0E8">
     <title>{% block title %}Fake News Analyzer{% endblock %}</title>
-    
-    <!-- Bootstrap 5 CSS (loaded from CDN — no local install needed) -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    
-    <!-- Bootstrap Icons -->
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    
-    <!-- Google Fonts — Inter for clean modern look -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    
-    <!-- Our custom CSS -->
     <link rel="stylesheet" href="{% static 'analyzer/style.css' %}">
-    
+
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <!-- ================================================================== -->
-    <!-- NAVIGATION BAR                                                      -->
-    <!-- ================================================================== -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-navbar">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="{% url 'home' %}">
-                <i class="bi bi-shield-check me-2"></i>Fake News Analyzer
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'home' %}" id="nav-home">
-                            <i class="bi bi-house-door me-1"></i>Home
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'analyze' %}" id="nav-analyze">
-                            <i class="bi bi-search me-1"></i>Analyze
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'dashboard' %}" id="nav-dashboard">
-                            <i class="bi bi-bar-chart-line me-1"></i>Dashboard
-                        </a>
-                    </li>
-                </ul>
-            </div>
-        </div>
+
+{# Fixed, behind everything, and purely decorative. #}
+<div class="bg-layer" aria-hidden="true">
+    <div class="shape shape-mint"></div>
+    <div class="shape shape-yellow"></div>
+    <div class="shape shape-lavender"></div>
+    <div class="shape shape-peach"></div>
+</div>
+
+<header class="topbar glass">
+    <a class="brand" href="{% url 'home' %}">
+        <div class="brand-icon"><i class="bi bi-shield-check"></i></div>
+        <span class="brand-text">Fake News Analyzer</span>
+    </a>
+
+    <nav class="topnav">
+        <a class="nav-item {% block nav_home %}{% endblock %}" href="{% url 'home' %}" id="nav-home">
+            <i class="bi bi-house-door"></i><span>Home</span>
+        </a>
+        <a class="nav-item {% block nav_analyze %}{% endblock %}" href="{% url 'analyze' %}" id="nav-analyze">
+            <i class="bi bi-search"></i><span>Analyze</span>
+        </a>
+        <a class="nav-item {% block nav_dashboard %}{% endblock %}" href="{% url 'dashboard' %}" id="nav-dashboard">
+            <i class="bi bi-bar-chart-line"></i><span>Dashboard</span>
+        </a>
     </nav>
+</header>
 
-    <!-- ================================================================== -->
-    <!-- MAIN CONTENT AREA                                                   -->
-    <!-- ================================================================== -->
-    <main class="main-content">
-        {% block content %}{% endblock %}
-    </main>
+<main>
+    {% block content %}{% endblock %}
+</main>
 
-    
+<footer class="foot">
+    A student project. Every verdict is a guess with a measured error rate —
+    check important stories against several trusted outlets.
+</footer>
 
-    <!-- Bootstrap 5 JS Bundle (includes Popper) -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    
-    <!-- Chart.js — only loaded on pages that need it -->
-    {% block extra_scripts %}{% endblock %}
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>

@@ -1,268 +1,244 @@
-<!--
-dashboard.html — Analytics Dashboard
-=======================================
-Shows:
-  - Summary stat cards (total, real, fake)
-  - Pie chart (distribution of results)
-  - Bar chart (database fact-check matches vs. AI predictions)
-  - Table of recent analyses
-
-Charts are rendered using Chart.js (loaded from CDN).
-Chart data is fetched via JavaScript from the /api/dashboard-data/ endpoint.
--->
 {% extends "analyzer/base.html" %}
+{% comment %}
+dashboard.html — what this app has been asked so far
+====================================================
+Counts of verdicts and how they were reached. Note what these numbers are NOT:
+they are not accuracy. Nobody has told this app whether any of these verdicts
+was right. "64% Likely Fake" means 64% of the things people pasted came back
+fake, which says more about what people paste than about the model.
+
+Charts are Chart.js, fed by /api/dashboard-data/.
+{% endcomment %}
 
 {% block title %}Dashboard — Fake News Analyzer{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
 
 {% block content %}
-<section class="dashboard-section">
-    <div class="container">
-        <div class="text-center mb-4">
-            <h1 class="fw-bold">
-                <i class="bi bi-bar-chart-line text-primary me-2"></i>Analytics Dashboard
-            </h1>
-            <p class="text-muted">Overview of all news analyses performed</p>
-        </div>
+<div class="wrap wrap-wide stack">
 
-        {% if total == 0 %}
-        <!-- Empty State -->
-        <div class="text-center py-5">
-            <i class="bi bi-inbox display-1 text-muted"></i>
-            <h3 class="mt-3">No Analyses Yet</h3>
-            <p class="text-muted">Start analyzing news to see data here.</p>
-            <a href="{% url 'analyze' %}" class="btn btn-primary btn-lg">
-                <i class="bi bi-search me-2"></i>Analyze News Now
+    <div class="center in">
+        <h1 style="font-size: 34px;">Dashboard</h1>
+        <p class="muted" style="margin-top: 6px;">
+            Every story this app has been asked about, and how it answered.
+        </p>
+    </div>
+
+    {% if total == 0 %}
+    <section class="card card-lg in d1">
+        <div class="empty">
+            <div class="empty-icon"><i class="bi bi-inbox"></i></div>
+            <h2>No Analyses Yet</h2>
+            <p class="muted" style="margin: 8px auto var(--space-lg); max-width: 360px;">
+                Check a story and it will show up here.
+            </p>
+            <a href="{% url 'analyze' %}" class="btn btn-primary">
+                <i class="bi bi-search"></i> Check a story
             </a>
         </div>
-        {% else %}
+    </section>
 
-        <!-- ============================================================ -->
-        <!-- STAT CARDS                                                    -->
-        <!-- ============================================================ -->
-        <div class="row g-3 mb-4">
-            <div class="col-12 col-md-3">
-                <div class="stat-card stat-total">
-                    <div class="stat-icon"><i class="bi bi-clipboard-data"></i></div>
-                    <div class="stat-number">{{ total }}</div>
-                    <div class="stat-label">Total Analyses</div>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
-                <div class="stat-card stat-real">
-                    <div class="stat-icon"><i class="bi bi-check-circle"></i></div>
-                    <div class="stat-number">{{ real_count }}</div>
-                    <div class="stat-label">Likely Real ({{ real_pct }}%)</div>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
-                <div class="stat-card stat-fake">
-                    <div class="stat-icon"><i class="bi bi-x-circle"></i></div>
-                    <div class="stat-number">{{ fake_count }}</div>
-                    <div class="stat-label">Likely Fake ({{ fake_pct }}%)</div>
-                </div>
-            </div>
-            <!-- Expected to be the biggest number of the three. The reading
-                 model only reports on about a third of unknown articles; on the
-                 rest it declines to guess. A large count here is the system
-                 working as designed, not a fault. -->
-            <div class="col-6 col-md-3">
-                <div class="stat-card stat-unsure">
-                    <div class="stat-icon"><i class="bi bi-question-circle"></i></div>
-                    <div class="stat-number">{{ unsure_count }}</div>
-                    <div class="stat-label">Not Sure ({{ unsure_pct }}%)</div>
-                </div>
-            </div>
+    {% else %}
+
+    {# ── COUNTS ────────────────────────────────────────────────────────── #}
+    <section class="stat-grid in d1">
+        <div class="stat stat-total">
+            <i class="bi bi-clipboard-data"></i>
+            <div class="stat-num">{{ total }}</div>
+            <div class="stat-label">Total checked</div>
         </div>
-
-        <!-- ============================================================ -->
-        <!-- CHARTS ROW                                                    -->
-        <!-- ============================================================ -->
-        <div class="row g-4 mb-4">
-            <!-- Pie Chart -->
-            <div class="col-md-5">
-                <div class="card chart-card h-100">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-pie-chart me-2"></i>Result Distribution
-                        </h5>
-                        <div class="chart-container">
-                            <canvas id="pieChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <!-- Bar Chart -->
-            <div class="col-md-7">
-                <div class="card chart-card h-100">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-bar-chart me-2"></i>How Verdicts Were Reached
-                        </h5>
-                        <div class="chart-container">
-                            <canvas id="methodChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="stat stat-real">
+            <i class="bi bi-check-circle"></i>
+            <div class="stat-num">{{ real_count }}</div>
+            <div class="stat-label">Likely Real · {{ real_pct }}%</div>
         </div>
+        <div class="stat stat-fake">
+            <i class="bi bi-x-circle"></i>
+            <div class="stat-num">{{ fake_count }}</div>
+            <div class="stat-label">Likely Fake · {{ fake_pct }}%</div>
+        </div>
+        {% comment %}
+        Counted explicitly rather than lumped in anywhere. Since Step 2 stopped
+        guessing, "Not Sure" is a real outcome, and three numbers that did not
+        add up to the total would just look broken.
+        {% endcomment %}
+        <div class="stat stat-unsure">
+            <i class="bi bi-question-circle"></i>
+            <div class="stat-num">{{ unsure_count }}</div>
+            <div class="stat-label">Not Sure · {{ unsure_pct }}%</div>
+        </div>
+    </section>
 
-        <!-- ============================================================ -->
-        <!-- RECENT ANALYSES TABLE                                         -->
-        <!-- ============================================================ -->
+    {# ── CHARTS ────────────────────────────────────────────────────────── #}
+    <section class="chart-grid in d2">
         <div class="card">
-            <div class="card-body">
-                <h5 class="fw-bold mb-3">
-                    <i class="bi bi-clock-history me-2"></i>Recent Analyses
-                </h5>
-                <div class="table-responsive">
-                    <table class="table table-hover" id="analyses-table">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Headline</th>
-                                <th>Result</th>
-                                <th>Confidence</th>
-                                <th>Method</th>
-                                <th>Date</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in recent %}
-                            <tr>
-                                <td>{{ item.id }}</td>
-                                <td class="headline-cell">{{ item.headline|truncatewords:12 }}</td>
-                                <td>
-                                    {% if item.result_label == 'Likely Real' %}
-                                        <span class="badge bg-success">✅ {{ item.result_label }}</span>
-                                    {% elif item.result_label == 'Not Sure' %}
-                                        <span class="badge bg-secondary">🤷 {{ item.result_label }}</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">❌ {{ item.result_label }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if item.confidence %}<strong>{{ item.confidence }}%</strong>
-                                    {% else %}<span class="text-muted">—</span>{% endif %}
-                                </td>
-                                <td>
-                                    {% if item.method == 'database' %}
-                                        <span class="badge bg-info text-dark">Database</span>
-                                    {% elif item.method == 'reading_model' %}
-                                        <span class="badge bg-primary">Reading Model</span>
-                                    {% elif item.method == 'ml_prediction' %}
-                                        <span class="badge bg-warning text-dark">Word-Counter</span>
-                                    {% else %}
-                                        <span class="text-muted">—</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ item.analyzed_at|date:"M j, Y" }}</td>
-                                <td>
-                                    <a href="{% url 'result' item.id %}" class="btn btn-sm btn-outline-primary">
-                                        View
-                                    </a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <h2 class="card-title"><i class="bi bi-pie-chart"></i> What we answered</h2>
+            <div class="chart-box"><canvas id="pieChart"></canvas></div>
         </div>
+        <div class="card">
+            <h2 class="card-title"><i class="bi bi-bar-chart"></i> How we answered it</h2>
+            <div class="chart-box"><canvas id="methodChart"></canvas></div>
+        </div>
+    </section>
 
-        {% endif %}
+    {# ── RECENT ────────────────────────────────────────────────────────── #}
+    <section class="card in d3">
+        <h2 class="card-title"><i class="bi bi-clock-history"></i> Recent</h2>
+        <div class="table-scroll">
+            <table id="analyses-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Headline</th>
+                        <th>Result</th>
+                        <th>Reliability</th>
+                        <th>Method</th>
+                        <th>Date</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in recent %}
+                    <tr>
+                        <td class="muted">{{ item.id }}</td>
+                        <td class="cell-headline">{{ item.headline|truncatewords:12 }}</td>
+                        <td>
+                            {% if item.result_label == 'Likely Real' %}
+                                <span class="pill pill-mint pill-flat">✅ {{ item.result_label }}</span>
+                            {% elif item.result_label == 'Not Sure' %}
+                                <span class="pill pill-lavender pill-flat">🤷 {{ item.result_label }}</span>
+                            {% else %}
+                                <span class="pill pill-coral pill-flat">❌ {{ item.result_label }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.confidence %}<strong>{{ item.confidence }}%</strong>
+                            {% else %}<span class="muted">—</span>{% endif %}
+                        </td>
+                        <td>
+                            {% if item.method == 'database' %}
+                                <span class="pill pill-lavender pill-flat">Database</span>
+                            {% elif item.method == 'reading_model' %}
+                                <span class="pill pill-flat">Reading Model</span>
+                            {% elif item.method == 'ml_prediction' %}
+                                <span class="pill pill-yellow pill-flat">Word-Counter</span>
+                            {% else %}
+                                <span class="muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="muted" style="white-space: nowrap;">{{ item.analyzed_at|date:"M j, Y" }}</td>
+                        <td>
+                            <a href="{% url 'result' item.id %}" class="btn btn-sm">View</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div class="notice notice-plain in d3">
+        <i class="bi bi-info-circle"></i>
+        <p>
+            These are counts of what the app <em>said</em>, not of what was true.
+            Nobody has checked these verdicts against reality, so the split above
+            describes the stories people pasted — not how accurate the model is.
+        </p>
     </div>
-</section>
+
+    {% endif %}
+
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
 {% if total > 0 %}
-<!-- Chart.js CDN — loaded only on dashboard page -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-
 <script>
-/**
- * Dashboard Charts
- * ================
- * We fetch data from our Django API endpoint (/api/dashboard-data/)
- * and render two charts using Chart.js:
- *   1. Pie Chart — shows distribution of Real/Fake
- *   2. Bar Chart — shows how many verdicts came from the fact-check database
- *                  vs. the ML model
+/*
+ * Dashboard charts.
+ *
+ * Colours are taken from the palette in style.css and mean the same things they
+ * mean everywhere else in the app: mint is real, coral is fake, lavender is
+ * "came from the database" or "no verdict". A chart that coloured these
+ * differently from the badges beside it would be actively misleading.
  */
+const INK    = '#1A1A1A';
+const MINT   = '#A8E6CF';
+const CORAL  = '#FF6B6B';
+const LAV    = '#DDA0DD';
+const YELLOW = '#FFD93D';
 
-// Fetch chart data from our API
+Chart.defaults.font.family = "'Inter', sans-serif";
+Chart.defaults.font.size = 13;
+Chart.defaults.color = '#4A4A4A';
+
 fetch("{% url 'dashboard_data' %}")
     .then(response => response.json())
     .then(data => {
-        // ---- PIE CHART ----
-        const pieCtx = document.getElementById('pieChart').getContext('2d');
-        new Chart(pieCtx, {
-            type: 'doughnut',  // doughnut is a pie chart with a hole
+        new Chart(document.getElementById('pieChart'), {
+            type: 'doughnut',
             data: {
                 labels: data.pie_data.labels,
                 datasets: [{
                     data: data.pie_data.counts,
-                    backgroundColor: [
-                        '#198754',  // Green for Real
-                        '#dc3545',  // Red for Fake
-                        '#64748b',  // Neutral slate for Not Sure — no accusation
-                    ],
-                    borderWidth: 3,
-                    borderColor: '#fff',
+                    backgroundColor: [MINT, CORAL, LAV],
+                    borderColor: INK,
+                    borderWidth: 2.5,
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                cutout: '58%',
                 plugins: {
                     legend: {
                         position: 'bottom',
-                        labels: { padding: 20, font: { size: 13 } }
+                        labels: {
+                            padding: 16,
+                            boxWidth: 14,
+                            usePointStyle: true,
+                            pointStyle: 'rectRounded',
+                        }
                     }
                 }
             }
         });
 
-        // ---- METHOD BAR CHART ----
-        const methodCtx = document.getElementById('methodChart').getContext('2d');
-        new Chart(methodCtx, {
+        // A non-zero 'Word-Counter' bar is a warning, not a statistic: it means
+        // the reading model failed to load and the old fallback answered.
+        new Chart(document.getElementById('methodChart'), {
             type: 'bar',
             data: {
                 labels: data.method_data.labels,
                 datasets: [{
-                    label: 'Verdicts',
                     data: data.method_data.counts,
-                    backgroundColor: [
-                        'rgba(13, 202, 240, 0.7)',   // Database match
-                        'rgba(108, 117, 125, 0.7)',  // AI prediction
-                    ],
-                    borderColor: ['#0dcaf0', '#6c757d'],
-                    borderWidth: 1,
-                    borderRadius: 6,
+                    backgroundColor: [LAV, MINT, YELLOW],
+                    borderColor: INK,
+                    borderWidth: 2.5,
+                    borderRadius: 8,
+                    borderSkipped: false,
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
+                plugins: { legend: { display: false } },
                 scales: {
                     y: {
                         beginAtZero: true,
-                        ticks: { stepSize: 1, precision: 0 }
+                        ticks: { stepSize: 1, precision: 0 },
+                        grid: { color: 'rgba(26,26,26,0.07)' },
+                        border: { color: INK, width: 2 },
                     },
                     x: {
-                        ticks: { font: { size: 12 } }
+                        grid: { display: false },
+                        border: { color: INK, width: 2 },
                     }
                 }
             }
         });
     })
-    .catch(error => {
-        console.error('Error loading chart data:', error);
-    });
+    .catch(error => console.error('Could not load chart data:', error));
 </script>
 {% endif %}
 {% endblock %}

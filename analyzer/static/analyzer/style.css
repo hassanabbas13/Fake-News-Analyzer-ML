@@ -1,458 +1,855 @@
-/*
- * style.css — Custom Styles for Fake News Analyzer
- * ==================================================
- * This file adds custom styling on top of Bootstrap 5.
- * Colors are chosen to match the project theme:
- *   - Green (#198754)  = Likely Real
- *   - Yellow (#ffc107) = Suspicious  
- *   - Red (#dc3545)    = Likely Fake
- */
+/* ═══════════════════════════════════════════════════════════════════════════
+   style.css — Fake News Analyzer, neo-brutalist
+   ═══════════════════════════════════════════════════════════════════════════
 
-/* ================================================================== */
-/* BASE STYLES                                                         */
-/* ================================================================== */
+   Palette and the neo-brutalist details (hard offset shadows, 2px black
+   borders, press-down buttons, drifting blurred shapes behind frosted glass)
+   are carried over from the Lumen RAG design. Mint × yellow × lavender × cream.
+
+   This file is self-contained. Bootstrap's stylesheet is deliberately NOT
+   loaded any more: it fought the hard shadows and flat borders at every turn.
+   Only Bootstrap ICONS remain, which is a font, not a layout system.
+
+   One rule holds the whole design together, and it is worth stating because
+   every colour choice below follows from it:
+
+       COLOUR CARRIES MEANING HERE, so it may not be used for decoration.
+
+       mint   = real            coral = fake
+       yellow = caution         lavender = came from the database
+       cream  = neutral chrome
+
+   A verdict page is not a place to be playful with hue. Someone reads the
+   colour before they read the words, so a mint panel around a "Likely Fake"
+   result would tell them the opposite of what the model said. Accents on
+   non-verdict pages stay in yellow and lavender for that reason: those two
+   never claim anything about an article's truth.
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-    --color-real: #198754;
-    --color-suspicious: #ffc107;
-    --color-fake: #dc3545;
-    --color-primary: #4f46e5;
-    --color-primary-dark: #3730a3;
-    --bg-dark: #0f172a;
-    --bg-card: #ffffff;
-    --text-primary: #1e293b;
-    --text-muted: #64748b;
+    /* ─── Palette ─── */
+    --mint: #A8E6CF;
+    --mint-dark: #7FD8B5;
+    --mint-light: #DCFAEC;
+
+    --yellow: #FFD93D;
+    --yellow-soft: #FFF3B0;
+    --yellow-dark: #E8C020;
+
+    --lavender: #DDA0DD;
+    --lavender-soft: #F0E0F0;
+    --lavender-dark: #C080C0;
+
+    --peach: #FFB7B2;
+    --peach-soft: #FFE0DE;
+
+    /* The one addition to the reference palette. Peach is too gentle to head a
+       "Likely Fake" page — it reads as decoration rather than a warning — so
+       this is a saturated member of the same family. */
+    --coral: #FF6B6B;
+    --coral-dark: #E85555;
+
+    --cream: #F5F0E8;
+    --cream-dark: #E8E0D4;
+    --warm-white: #FAF8F5;
+
+    --neo-black: #1A1A1A;
+    --text-primary: #1A1A1A;
+    --text-secondary: #4A4A4A;
+    --text-muted: #8A8A8A;
+
+    /* ─── Glass ─── */
+    --glass-bg: rgba(250, 248, 245, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.85);
+    --glass-highlight: rgba(255, 255, 255, 0.95);
+    --glass-shadow: rgba(26, 26, 26, 0.06);
+    --blur-amount: blur(28px) saturate(130%);
+
+    /* ─── Spacing ─── */
+    --space-xs: 6px;
+    --space-sm: 10px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+
+    /* ─── Radius ─── */
+    --radius-sm: 12px;
+    --radius-md: 18px;
+    --radius-lg: 24px;
+    --radius-xl: 28px;
+
+    /* ─── Motion ─── */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-* {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
 
 body {
-    background-color: #f1f5f9;
-    color: var(--text-primary);
     min-height: 100vh;
-    display: flex;
-    flex-direction: column;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: var(--cream);
+    -webkit-font-smoothing: antialiased;
 }
 
-.main-content {
-    flex: 1;
-    padding-bottom: 3rem;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BACKGROUND
+   Fixed behind everything, so it does not scroll with the page and does not
+   cost a repaint on every wheel tick.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bg-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    background: linear-gradient(160deg,
+        var(--cream) 0%,
+        var(--mint-light) 35%,
+        var(--peach-soft) 70%,
+        var(--yellow-soft) 100%);
 }
 
-/* ================================================================== */
-/* NAVBAR                                                              */
-/* ================================================================== */
-
-.bg-navbar {
-    background: linear-gradient(135deg, var(--bg-dark) 0%, #1e293b 100%) !important;
-    box-shadow: 0 2px 15px rgba(0, 0, 0, 0.15);
-}
-
-.navbar-brand {
-    font-size: 1.25rem;
-    letter-spacing: -0.5px;
-}
-
-.nav-link {
-    font-weight: 500;
-    padding: 0.5rem 1rem !important;
-    border-radius: 8px;
-    margin: 0 2px;
-    transition: all 0.2s ease;
-}
-
-.nav-link:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-
-/* ================================================================== */
-/* HERO SECTION (Home Page)                                            */
-/* ================================================================== */
-
-.hero-section {
-    background: linear-gradient(135deg, var(--bg-dark) 0%, #1e293b 50%, #0f2847 100%);
-    color: white;
-    padding: 5rem 0;
-    min-height: 80vh;
-    display: flex;
-    align-items: center;
-}
-
-.min-vh-75 {
-    min-height: 50vh;
-}
-
-.hero-badge {
-    display: inline-block;
-    background: rgba(79, 70, 229, 0.2);
-    color: #a5b4fc;
-    padding: 0.4rem 1rem;
-    border-radius: 50px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    border: 1px solid rgba(79, 70, 229, 0.3);
-}
-
-.hero-title {
-    font-size: 3.5rem;
-    font-weight: 800;
-    line-height: 1.1;
-    letter-spacing: -1.5px;
-    margin-bottom: 1.5rem;
-}
-
-.text-gradient {
-    background: linear-gradient(135deg, #818cf8, #c084fc, #f472b6);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.hero-subtitle {
-    font-size: 1.15rem;
-    color: #94a3b8;
-    line-height: 1.7;
-    margin-bottom: 2rem;
-    max-width: 540px;
-}
-
-/* Floating cards visual on home page */
-.hero-visual {
-    position: relative;
-    height: 350px;
-}
-
-.hero-card {
+.shape {
     position: absolute;
-    padding: 1.2rem 1.8rem;
-    border-radius: 16px;
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.55;
+    animation: shapeDrift 18s ease-in-out infinite;
+}
+.shape-mint     { width: 450px; height: 450px; background: var(--mint);          top: -8%;    left: -6%;   animation-delay: 0s; }
+.shape-yellow   { width: 380px; height: 380px; background: var(--yellow-soft);   top: 35%;    right: -8%;  animation-delay: -6s;  opacity: 0.7; }
+.shape-lavender { width: 320px; height: 320px; background: var(--lavender-soft); bottom: -4%; left: 25%;   animation-delay: -12s; }
+.shape-peach    { width: 280px; height: 280px; background: var(--peach);         top: 15%;    left: 45%;   animation-delay: -9s;  opacity: 0.4; }
+
+@keyframes shapeDrift {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    33%      { transform: translate(25px, -35px) scale(1.08); }
+    66%      { transform: translate(-15px, 25px) scale(0.95); }
+}
+
+/* Someone who has asked their operating system to stop moving things means it.
+   The shapes are decoration; nothing is lost by holding them still. */
+@media (prefers-reduced-motion: reduce) {
+    .shape { animation: none; }
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SHARED PIECES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.glass {
+    background: var(--glass-bg);
+    backdrop-filter: var(--blur-amount);
+    -webkit-backdrop-filter: var(--blur-amount);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px var(--glass-shadow),
+                inset 0 1px 1px var(--glass-highlight);
+}
+
+.wrap {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: var(--space-lg) var(--space-md) var(--space-xl);
+}
+.wrap-wide { max-width: 1180px; }
+
+h1, h2, h3, h4, h5, h6, .display {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+}
+
+a { color: var(--text-primary); text-decoration-color: var(--mint-dark); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--neo-black); }
+
+.muted { color: var(--text-muted); }
+.small { font-size: 13px; }
+.center { text-align: center; }
+.stack > * + * { margin-top: var(--space-lg); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOP BAR
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.topbar {
+    position: sticky;
+    top: var(--space-md);
+    z-index: 50;
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-weight: 600;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-    animation: float 3s ease-in-out infinite;
-    backdrop-filter: blur(10px);
+    gap: var(--space-md);
+    width: calc(100% - var(--space-lg));
+    max-width: 1180px;
+    margin: var(--space-md) auto var(--space-lg);
+    padding: 0 var(--space-lg);
+    height: 64px;
 }
 
-.hero-card small {
-    margin-left: auto;
-    opacity: 0.7;
-    font-weight: 400;
+.brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    text-decoration: none;
+    flex-shrink: 0;
 }
-
-.hero-card i {
-    font-size: 1.4rem;
-}
-
-.card-real {
-    top: 20px;
-    left: 10px;
-    background: rgba(25, 135, 84, 0.15);
-    border: 1px solid rgba(25, 135, 84, 0.3);
-    color: #6ee7b7;
-    animation-delay: 0s;
-}
-
-.card-suspicious {
-    top: 130px;
-    left: 60px;
-    background: rgba(255, 193, 7, 0.15);
-    border: 1px solid rgba(255, 193, 7, 0.3);
-    color: #fde68a;
-    animation-delay: 0.5s;
-}
-
-.card-fake {
-    top: 240px;
-    left: 20px;
-    background: rgba(220, 53, 69, 0.15);
-    border: 1px solid rgba(220, 53, 69, 0.3);
-    color: #fca5a5;
-    animation-delay: 1s;
-}
-
-@keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-}
-
-/* ================================================================== */
-/* FEATURES SECTION (Home Page)                                        */
-/* ================================================================== */
-
-.features-section {
-    padding: 5rem 0;
-    background: white;
-}
-
-.feature-card {
-    text-align: center;
-    padding: 2rem;
-    border-radius: 16px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    transition: all 0.3s ease;
-    height: 100%;
-}
-
-.feature-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-}
-
-.feature-icon {
-    width: 60px;
-    height: 60px;
-    border-radius: 16px;
+.brand-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--mint-dark);
+    border: 2px solid var(--neo-black);
+    box-shadow: 3px 3px 0 var(--neo-black);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.5rem;
-    margin: 0 auto 1rem;
+    font-size: 17px;
+    color: var(--neo-black);
+    transition: transform 0.2s var(--ease-spring);
 }
-
-/* ================================================================== */
-/* ANALYZE SECTION                                                     */
-/* ================================================================== */
-
-.analyze-section {
-    padding: 3rem 0;
-}
-
-.analysis-card {
-    border: none;
-    border-radius: 16px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-}
-
-.tips-card {
-    border: none;
-    border-radius: 16px;
-    background: #f8fafc;
-}
-
-.tip-item {
-    padding: 0.75rem 1rem;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: 1px solid #e2e8f0;
-    background: white;
-}
-
-.tip-item:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-}
-
-/* ================================================================== */
-/* RESULT SECTION                                                      */
-/* ================================================================== */
-
-.result-section {
-    padding: 3rem 0;
-}
-
-.result-card {
-    border: none;
-    border-radius: 20px;
-    overflow: hidden;
-}
-
-.result-icon-large {
-    font-size: 4rem;
-}
-
-.score-badge {
-    display: inline-block;
-    padding: 0.5rem 1.5rem;
-    border-radius: 50px;
+.brand:hover .brand-icon { transform: rotate(-8deg) scale(1.05); }
+.brand-text {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 19px;
     font-weight: 700;
-    font-size: 1.2rem;
-    background: rgba(255, 255, 255, 0.25);
-    backdrop-filter: blur(10px);
-}
-
-/* Color-coded result cards */
-.result-real {
-    background: linear-gradient(135deg, #059669, #10b981);
-    color: white;
-}
-
-.result-suspicious {
-    background: linear-gradient(135deg, #d97706, #f59e0b);
-    color: white;
-}
-
-.result-fake {
-    background: linear-gradient(135deg, #dc2626, #ef4444);
-    color: white;
-}
-
-/* "Not Sure" — deliberately neutral slate, not amber.
-   The reading model returns this when its judgement has been measured as too
-   unreliable to report, which is not the same as "this looks suspicious".
-   Any warm colour here would imply an accusation the verdict does not make. */
-.result-unsure {
-    background: linear-gradient(135deg, #475569, #64748b);
-    color: white;
-}
-
-.keyword-section {
-    padding: 1rem;
-    border-radius: 12px;
-    background: #f8fafc;
-}
-
-/* ================================================================== */
-/* DASHBOARD SECTION                                                   */
-/* ================================================================== */
-
-.dashboard-section {
-    padding: 3rem 0;
-}
-
-/* Stat Cards */
-.stat-card {
-    border-radius: 16px;
-    padding: 1.5rem;
-    text-align: center;
-    transition: all 0.3s ease;
-    border: 1px solid #e2e8f0;
-    background: white;
-}
-
-.stat-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
-}
-
-.stat-icon {
-    font-size: 1.8rem;
-    margin-bottom: 0.5rem;
-}
-
-.stat-number {
-    font-size: 2.2rem;
-    font-weight: 800;
-    letter-spacing: -1px;
-}
-
-.stat-label {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.stat-total .stat-icon { color: var(--color-primary); }
-.stat-total .stat-number { color: var(--color-primary); }
-
-.stat-real .stat-icon { color: var(--color-real); }
-.stat-real .stat-number { color: var(--color-real); }
-
-.stat-suspicious .stat-icon { color: var(--color-suspicious); }
-.stat-suspicious .stat-number { color: #b45309; }
-
-.stat-fake .stat-icon { color: var(--color-fake); }
-.stat-fake .stat-number { color: var(--color-fake); }
-
-.stat-unsure .stat-icon { color: #64748b; }
-.stat-unsure .stat-number { color: #475569; }
-
-/* Chart Cards */
-.chart-card {
-    border: none;
-    border-radius: 16px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-}
-
-.chart-container {
-    position: relative;
-    height: 300px;
-}
-
-/* Table Styles */
-.headline-cell {
-    max-width: 300px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    letter-spacing: -0.03em;
     white-space: nowrap;
 }
 
-/* ================================================================== */
-/* FOOTER                                                              */
-/* ================================================================== */
-
-.footer-section {
-    background: var(--bg-dark);
-    color: #94a3b8;
-    padding: 2rem 0;
-    margin-top: auto;
+.topnav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-left: auto;
 }
-
-/* ================================================================== */
-/* BUTTON OVERRIDES                                                    */
-/* ================================================================== */
-
-.btn-primary {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    border-radius: 10px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    border: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: all 0.15s var(--ease-out);
 }
-
-.btn-primary:hover {
-    background: var(--color-primary-dark);
-    border-color: var(--color-primary-dark);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+.nav-item:hover {
+    background: rgba(255, 255, 255, 0.6);
+    border-color: var(--neo-black);
+    box-shadow: 2px 2px 0 var(--neo-black);
+    transform: translate(-1px, -1px);
 }
-
-.btn-outline-light {
-    border-radius: 10px;
-    font-weight: 600;
-}
-
-.btn-outline-secondary {
-    border-radius: 10px;
+.nav-item.active {
+    background: var(--neo-black);
+    color: var(--warm-white);
+    border-color: var(--neo-black);
+    box-shadow: 3px 3px 0 var(--mint-dark);
     font-weight: 600;
 }
+.nav-item.active:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 4px 0 var(--mint-dark);
+}
 
-/* ================================================================== */
-/* CARD OVERRIDES                                                      */
-/* ================================================================== */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BUTTONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 13px 24px;
+    border-radius: var(--radius-md);
+    border: 2.5px solid var(--neo-black);
+    background: var(--warm-white);
+    color: var(--neo-black);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    cursor: pointer;
+    box-shadow: 4px 4px 0 var(--neo-black);
+    transition: all 0.15s var(--ease-spring);
+}
+.btn:hover  { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--neo-black); }
+.btn:active { transform: translate(2px, 2px);   box-shadow: 1px 1px 0 var(--neo-black); }
+.btn:focus-visible { outline: 3px solid var(--lavender-dark); outline-offset: 3px; }
+
+.btn-primary { background: var(--yellow); }
+.btn-primary:hover { background: var(--yellow-soft); }
+.btn-mint { background: var(--mint-dark); }
+.btn-mint:hover { background: var(--mint); }
+.btn-ghost { background: rgba(255, 255, 255, 0.7); box-shadow: 3px 3px 0 var(--neo-black); }
+.btn-ghost:hover { background: white; }
+
+.btn-lg { padding: 16px 30px; font-size: 16px; }
+.btn-sm {
+    padding: 5px 13px;
+    font-size: 12px;
+    border-width: 2px;
+    border-radius: var(--radius-sm);
+    box-shadow: 2px 2px 0 var(--neo-black);
+}
+.btn-sm:hover  { box-shadow: 3px 3px 0 var(--neo-black); transform: translate(-1px, -1px); }
+.btn-sm:active { box-shadow: 1px 1px 0 var(--neo-black); transform: translate(1px, 1px); }
+
+.btn-block { width: 100%; }
+
+.btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+}
+.btn-row-center { justify-content: center; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CARDS
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 .card {
-    border: 1px solid #e2e8f0;
-    border-radius: 16px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    position: relative;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--neo-black);
+    background: rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 5px 5px 0 var(--neo-black);
+}
+.card-lg { padding: var(--space-xl); }
+
+/* The 3px rule along the top of a card. Purely a colour-coded label for what
+   kind of information is inside — see the colour rule at the top of the file. */
+.card-tab::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 18px; right: 18px;
+    height: 4px;
+    border-radius: 0 0 4px 4px;
+    background: var(--tab-colour, var(--mint-dark));
+}
+.tab-mint     { --tab-colour: var(--mint-dark); }
+.tab-yellow   { --tab-colour: var(--yellow); }
+.tab-lavender { --tab-colour: var(--lavender); }
+.tab-coral    { --tab-colour: var(--coral); }
+
+.card-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: var(--space-md);
+}
+.card-title i { font-size: 18px; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NOTICES
+   The flat, bordered relatives of Bootstrap's alerts.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.notice {
+    display: flex;
+    gap: 11px;
+    padding: 13px 16px;
+    border-radius: var(--radius-md);
+    border: 2px solid var(--neo-black);
+    background: var(--warm-white);
+    font-size: 14px;
+    line-height: 1.55;
+    box-shadow: 3px 3px 0 var(--neo-black);
+}
+.notice + * { margin-top: var(--space-md); }
+.notice i { font-size: 16px; flex-shrink: 0; margin-top: 2px; }
+.notice p:last-child { margin-bottom: 0; }
+
+.notice-mint     { background: var(--mint-light); }
+.notice-yellow   { background: var(--yellow-soft); }
+.notice-lavender { background: var(--lavender-soft); }
+.notice-coral    { background: var(--peach-soft); }
+.notice-plain    { background: var(--cream-dark); }
+
+/* Reserved for the two disagreement warnings on the result page. When the model
+   and the web contradict each other that is the single most useful thing on the
+   page, so it gets the only shadow in a colour other than black. */
+.notice-loud {
+    background: var(--yellow);
+    box-shadow: 4px 4px 0 var(--coral);
+    border-width: 2.5px;
 }
 
-/* ================================================================== */
-/* RESPONSIVE                                                          */
-/* ================================================================== */
 
-@media (max-width: 768px) {
-    .hero-title {
-        font-size: 2.2rem;
+/* ═══════════════════════════════════════════════════════════════════════════
+   PILLS AND BADGES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 13px;
+    border-radius: var(--radius-xl);
+    border: 2px solid var(--neo-black);
+    background: var(--warm-white);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    box-shadow: 2px 2px 0 var(--neo-black);
+}
+.pill-mint     { background: var(--mint); }
+.pill-coral    { background: var(--coral); }
+.pill-yellow   { background: var(--yellow); }
+.pill-lavender { background: var(--lavender-soft); }
+.pill-dark     { background: var(--neo-black); color: var(--warm-white); }
+.pill-flat     { box-shadow: none; border-width: 1.5px; font-size: 11px; padding: 3px 10px; }
+
+.pill-lg {
+    padding: 10px 22px;
+    font-size: 17px;
+    border-width: 2.5px;
+    box-shadow: 3px 3px 0 var(--neo-black);
+}
+
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--neo-black);
+    flex-shrink: 0;
+}
+.dot-mint  { background: var(--mint-dark); }
+.dot-coral { background: var(--coral); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HOME
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.hero {
+    text-align: center;
+    padding: var(--space-xl) 0 var(--space-lg);
+}
+.hero-title {
+    font-size: clamp(34px, 6vw, 54px);
+    letter-spacing: -0.035em;
+    margin-bottom: var(--space-md);
+}
+.hero-title .mark {
+    color: var(--coral-dark);
+    text-decoration: underline;
+    text-decoration-color: var(--yellow);
+    text-decoration-thickness: 5px;
+    text-underline-offset: 5px;
+}
+.hero-sub {
+    font-size: 17px;
+    color: var(--text-secondary);
+    max-width: 540px;
+    margin: 0 auto var(--space-xl);
+}
+
+/* The three numbered steps. Numbers are drawn rather than listed, because the
+   order they run in IS the explanation: the database answers first and best,
+   the model only sees what the database missed. */
+.steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-md);
+    margin-top: var(--space-xl);
+}
+.step {
+    padding: var(--space-lg) var(--space-md);
+    border-radius: var(--radius-md);
+    border: 2px solid var(--neo-black);
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(12px);
+    text-align: left;
+    transition: all 0.2s var(--ease-spring);
+}
+.step:hover {
+    transform: translate(-3px, -3px);
+    box-shadow: 5px 5px 0 var(--neo-black);
+    background: white;
+}
+.step-num {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 2px solid var(--neo-black);
+    box-shadow: 2px 2px 0 var(--neo-black);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: var(--space-sm);
+}
+.step:nth-child(1) .step-num { background: var(--lavender-soft); }
+.step:nth-child(2) .step-num { background: var(--mint); }
+.step:nth-child(3) .step-num { background: var(--yellow); }
+.step h3 { font-size: 16px; margin-bottom: 5px; }
+.step p  { font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE INPUT BOX
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.field-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: var(--space-sm);
+}
+.field-label .req { color: var(--coral-dark); }
+
+/* Django renders the textarea itself, so this styles whatever class the widget
+   in forms.py carries. Keep the two in step if that class is ever renamed. */
+.form-control {
+    width: 100%;
+    padding: 16px 18px;
+    border-radius: var(--radius-lg);
+    border: 2.5px solid var(--neo-black);
+    background: rgba(255, 255, 255, 0.88);
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    resize: vertical;
+    min-height: 190px;
+    outline: none;
+    box-shadow: 4px 4px 0 var(--neo-black);
+    transition: box-shadow 0.2s var(--ease-out), transform 0.2s var(--ease-out), background 0.2s;
+}
+.form-control:focus {
+    background: white;
+    box-shadow: 6px 6px 0 var(--mint-dark);
+    transform: translate(-1px, -1px);
+}
+.form-control::placeholder { color: var(--text-muted); }
+
+.field-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-top: var(--space-sm);
+}
+.field-help { font-size: 12.5px; color: var(--text-muted); }
+
+/* The live word counter. Its three states mirror the server's rules exactly —
+   under MIN_WORDS, inside the range, over MAX_WORDS — so the browser never
+   promises something clean_news_content() will then refuse. */
+.counter {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 13px;
+    border-radius: var(--radius-xl);
+    border: 2px solid var(--neo-black);
+    background: var(--cream-dark);
+    box-shadow: 2px 2px 0 var(--neo-black);
+    white-space: nowrap;
+    transition: background 0.2s;
+}
+.counter.ok    { background: var(--mint); }
+.counter.short { background: var(--yellow-soft); }
+.counter.over  { background: var(--coral); }
+
+.field-error {
+    display: flex;
+    gap: 10px;
+    margin-top: var(--space-sm);
+    padding: 12px 15px;
+    border-radius: var(--radius-md);
+    border: 2px solid var(--neo-black);
+    background: var(--peach-soft);
+    box-shadow: 3px 3px 0 var(--coral);
+    font-size: 14px;
+}
+.field-error ul { list-style: none; }
+.field-error li + li { margin-top: 5px; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE VERDICT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.verdict {
+    text-align: center;
+    padding: var(--space-xl) var(--space-lg);
+    border-radius: var(--radius-lg);
+    border: 3px solid var(--neo-black);
+    box-shadow: 7px 7px 0 var(--neo-black);
+}
+/* Modifier names come from views.result(), which picks one per verdict. */
+.result-real   { background: var(--mint); }
+.result-fake   { background: var(--coral); }
+.result-unsure { background: var(--lavender-soft); }
+
+.verdict-icon {
+    font-size: 56px;
+    line-height: 1;
+    margin-bottom: var(--space-sm);
+}
+.verdict-label {
+    font-size: clamp(30px, 5vw, 42px);
+    letter-spacing: -0.03em;
+}
+.verdict-score {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: var(--space-md);
+    padding: 10px 22px;
+    border-radius: var(--radius-xl);
+    border: 2.5px solid var(--neo-black);
+    background: var(--warm-white);
+    box-shadow: 3px 3px 0 var(--neo-black);
+}
+.verdict-score b {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+}
+.verdict-score span { font-size: 13px; color: var(--text-secondary); }
+
+/* The reliability bar. Not a confidence meter — for the reading model it is how
+   often verdicts like this one turn out correct, which is why views.py supplies
+   the wording and this file never labels it. */
+.meter {
+    height: 26px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--neo-black);
+    background: var(--warm-white);
+    overflow: hidden;
+    box-shadow: 3px 3px 0 var(--neo-black);
+}
+.meter-fill {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 9px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    border-right: 2px solid var(--neo-black);
+}
+.meter-real { background: var(--mint-dark); }
+.meter-fake { background: var(--coral); }
+
+.quote {
+    padding-left: var(--space-md);
+    border-left: 4px solid var(--neo-black);
+    font-size: 17px;
+    font-weight: 500;
+    line-height: 1.5;
+}
+.extract {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 2px dashed var(--cream-dark);
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.source-list { list-style: none; }
+.source-list li {
+    display: flex;
+    gap: 9px;
+    padding: 7px 0;
+    font-size: 13.5px;
+}
+.source-list li + li { border-top: 1px dashed var(--cream-dark); }
+.source-list .dot { margin-top: 7px; }
+
+.outlets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 7px;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DASHBOARD
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-md);
+}
+.stat {
+    padding: var(--space-lg) var(--space-md);
+    border-radius: var(--radius-md);
+    border: 2.5px solid var(--neo-black);
+    box-shadow: 4px 4px 0 var(--neo-black);
+    transition: all 0.2s var(--ease-spring);
+}
+.stat:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--neo-black); }
+.stat-total  { background: var(--warm-white); }
+.stat-real   { background: var(--mint); }
+.stat-fake   { background: var(--coral); }
+.stat-unsure { background: var(--lavender-soft); }
+
+.stat i { font-size: 20px; }
+.stat-num {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+}
+.stat-label { font-size: 13px; font-weight: 500; }
+
+.chart-grid {
+    display: grid;
+    grid-template-columns: 5fr 7fr;
+    gap: var(--space-md);
+}
+.chart-box { height: 260px; position: relative; }
+
+.table-scroll { overflow-x: auto; }
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13.5px;
+}
+thead th {
+    padding: 10px 12px;
+    text-align: left;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    border-bottom: 2.5px solid var(--neo-black);
+    white-space: nowrap;
+}
+tbody td {
+    padding: 11px 12px;
+    border-bottom: 1px dashed var(--cream-dark);
+    vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.15s; }
+tbody tr:hover { background: rgba(255, 255, 255, 0.7); }
+.cell-headline { min-width: 220px; max-width: 340px; font-weight: 500; }
+
+.empty {
+    text-align: center;
+    padding: var(--space-xl) var(--space-md);
+}
+.empty-icon {
+    width: 78px;
+    height: 78px;
+    margin: 0 auto var(--space-md);
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.6);
+    border: 2.5px dashed var(--neo-black);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    color: var(--text-muted);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FOOTER, SCROLLBAR, ENTRANCE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.foot {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: var(--space-lg) var(--space-md) var(--space-xl);
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(26, 26, 26, 0.18); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(26, 26, 26, 0.3); }
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.in { animation: slideUp 0.45s var(--ease-out) both; }
+.d1 { animation-delay: 0.06s; }
+.d2 { animation-delay: 0.12s; }
+.d3 { animation-delay: 0.18s; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NARROW SCREENS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 860px) {
+    .steps      { grid-template-columns: 1fr; }
+    .stat-grid  { grid-template-columns: repeat(2, 1fr); }
+    .chart-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+    body { font-size: 14.5px; }
+    .topbar {
+        height: auto;
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: var(--space-sm) var(--space-md);
+        gap: var(--space-sm);
+        position: static;
     }
-    
-    .hero-section {
-        padding: 3rem 0;
-        min-height: auto;
-    }
-    
-    .stat-number {
-        font-size: 1.6rem;
-    }
-    
-    .chart-container {
-        height: 250px;
-    }
+    .topnav { margin-left: 0; width: 100%; justify-content: center; }
+    .nav-item { padding: 7px 12px; font-size: 13px; }
+    /* Icon-only nav: the labels do not fit three-across on a phone and the
+       icons are unambiguous enough at this size. */
+    .nav-item span { display: none; }
+    .card    { padding: var(--space-md); }
+    .card-lg { padding: var(--space-lg) var(--space-md); }
+    .stat-grid { grid-template-columns: 1fr; }
+    .btn, .btn-lg { width: 100%; }
+    .verdict-icon { font-size: 46px; }
 }

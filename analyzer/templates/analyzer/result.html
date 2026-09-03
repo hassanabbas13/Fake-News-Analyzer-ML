@@ -1,317 +1,347 @@
-<!--
-result.html — Hybrid Analysis Result Page
-============================================
-Shows the classification result from the Hybrid System:
-  - Database Match (exact headline found in the fact-check dataset)
-  - AI Prediction (with confidence percentage)
-
-Any article counts or accuracy figures come from analysis_engine.py via
-analysis.explanation — do not type them into this template, or they will go
-stale the moment the data or model changes.
--->
 {% extends "analyzer/base.html" %}
+{% comment %}
+result.html — one analysis, explained
+=====================================
+Shows how the verdict was reached, and what it is worth.
+
+The rule that shapes this page: NO ARTICLE COUNTS OR ACCURACY FIGURES ARE TYPED
+HERE. They arrive through analysis.explanation, which analysis_engine.py builds
+from the model's own recorded numbers. A figure written into this template would
+survive the next retraining and quietly become a lie. That has already happened
+once in this project.
+
+The web-search block is kept visually separate from the verdict for the same
+reason. The verdict's percentage is measured on 3,160 articles with known
+answers. The web check is measured on nothing. Merging them would produce one
+confident-looking number with only half of it standing on evidence.
+
+Two template rules worth knowing before editing this file. The extends tag has
+to come first, ahead of even this comment, or the parser refuses the template.
+And a hash-style comment is single-line only — spread one over two lines and
+Django stops treating it as a comment and prints it into the page. Multi-line
+notes therefore use the comment tag, here and everywhere else in this directory.
+{% endcomment %}
 
 {% block title %}Result: {{ analysis.result_label }} — Fake News Analyzer{% endblock %}
+{% block nav_analyze %}active{% endblock %}
 
 {% block content %}
-<section class="result-section">
-    <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-lg-8">
-                
-                <!-- Result Card — color changes based on classification -->
-                <div class="card result-card {{ result_class }}">
-                    <div class="card-body text-center p-5">
-                        <div class="result-icon-large mb-3">{{ result_icon }}</div>
-                        <h1 class="fw-bold mb-2">{{ analysis.result_label }}</h1>
-                        
-                        <!-- Reliability Badge — the wording comes from the view,
-                             because this number means different things depending
-                             on how the verdict was reached. For the reading
-                             model it is how often flags like this are CORRECT,
-                             not how sure the model feels. -->
-                        {% if confidence %}
-                        <div class="mt-3">
-                            <span class="badge bg-dark fs-5 px-4 py-2">
-                                {{ confidence }}% {{ confidence_label }}
-                            </span>
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
+<div class="wrap stack">
 
-                <!-- How Was This Determined? -->
-                <div class="card mt-4 border-primary">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-cpu me-2"></i>How Was This Determined?
-                        </h5>
-                        
-                        {% if method == "database" %}
-                        <div class="alert alert-info mb-3">
-                            <i class="bi bi-database-check me-2"></i>
-                            <strong>Database Match</strong> — this headline was found in our fact-check dataset, so the label below comes straight from that dataset rather than from a prediction.
-                        </div>
-                        {% elif method == "reading_model" %}
-                            {% if analysis.result_label == "Not Sure" %}
-                            <div class="alert alert-secondary mb-3">
-                                <i class="bi bi-question-circle me-2"></i>
-                                <strong>No Verdict</strong> — this result was saved by an earlier version of the analyzer, which declined to answer on articles like this one.
-                            </div>
-                            {% elif analysis.result_label == "Likely Real" %}
-                            <div class="alert alert-warning mb-3">
-                                <i class="bi bi-robot me-2"></i>
-                                <strong>Reading Model — weaker verdict</strong> — this headline was not in our dataset, so our model read the writing itself. "Likely Real" is the less reliable of its two answers: it is wrong more than a third of the time. Treat it as "nothing obviously wrong", not as clearance.
-                            </div>
-                            {% else %}
-                            <div class="alert alert-warning mb-3">
-                                <i class="bi bi-robot me-2"></i>
-                                <strong>Reading Model — stronger verdict</strong> — this headline was not in our dataset, so our model read the writing itself. "Likely Fake" is the more reliable of its two answers, but still wrong about a quarter of the time. See below.
-                            </div>
-                            {% endif %}
-                        {% elif method == "ml_prediction" %}
-                        <div class="alert alert-warning mb-3">
-                            <i class="bi bi-exclamation-triangle me-2"></i>
-                            <strong>Fallback Word-Counter</strong> — the reading model could not be loaded, so an older and weaker model classified the text. Its verdicts are less trustworthy; see the explanation below.
-                        </div>
-                        {% endif %}
+    {# ── THE VERDICT ───────────────────────────────────────────────────── #}
+    <section class="verdict {{ result_class }} in">
+        <div class="verdict-icon">{{ result_icon }}</div>
+        <h1 class="verdict-label">{{ analysis.result_label }}</h1>
 
-                        <!-- Reliability Bar. Skipped entirely for "Not Sure",
-                             because there is no trustworthy figure to draw. -->
-                        {% if confidence %}
-                        <label class="fw-bold mb-1">{{ confidence_label|capfirst }}:</label>
-                        <div class="progress" style="height: 25px;">
-                            {% if analysis.result_label == "Likely Real" %}
-                            <div class="progress-bar bg-success" role="progressbar" style="width: {{ confidence }}%">
-                                {{ confidence }}%
-                            </div>
-                            {% else %}
-                            <div class="progress-bar bg-danger" role="progressbar" style="width: {{ confidence }}%">
-                                {{ confidence }}%
-                            </div>
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
+        {% comment %}
+        The percentage means different things depending on how the verdict was
+        reached, so the wording comes from views.py. For the reading model it is
+        how often verdicts like this one are CORRECT — not how sure the model
+        feels. Calling that "confidence" would be wrong.
+        {% endcomment %}
+        {% if confidence %}
+        <div class="verdict-score">
+            <b>{{ confidence }}%</b>
+            <span>{{ confidence_label }}</span>
+        </div>
+        {% endif %}
+    </section>
 
-                <!-- Analyzed Headline -->
-                <div class="card mt-4">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-newspaper me-2"></i>Analyzed Headline
-                        </h5>
-                        <p class="lead mb-0">"{{ analysis.headline }}"</p>
-                        {% if analysis.article_text %}
-                            <hr>
-                            <h6 class="fw-bold">Article Text:</h6>
-                            <p class="text-muted">{{ analysis.article_text|truncatewords:100 }}</p>
-                        {% endif %}
-                    </div>
-                </div>
+    {# ── HOW WE GOT THERE ──────────────────────────────────────────────── #}
+    <section class="card card-tab tab-lavender in d1">
+        <h2 class="card-title"><i class="bi bi-cpu"></i> How was this determined?</h2>
 
-                <!-- Explanation -->
-                <div class="card mt-4">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-info-circle me-2"></i>Full Explanation
-                        </h5>
-                        <p class="mb-0">{{ analysis.explanation }}</p>
-                    </div>
-                </div>
+        {% if method == "database" %}
+        <div class="notice notice-lavender">
+            <i class="bi bi-database-check"></i>
+            <p>
+                <strong>Database match</strong> — this headline was found in our
+                fact-check dataset, so the label above comes straight from that
+                dataset rather than from a prediction.
+            </p>
+        </div>
 
-                {# ------------------------------------------------------------
-                   WHAT THE WEB SAYS
-
-                   Shown as a SEPARATE answer, never merged into the verdict
-                   above. The verdict's percentage is measured on 3,160 articles
-                   with known answers; this is measured on nothing, so blending
-                   them would produce a number with nothing behind it. Two
-                   answers side by side, and when they disagree the page says so
-                   rather than quietly picking one.
-
-                   Only present when the reading model was unsure -- see
-                   web_check.should_check(). Three states, deliberately worded
-                   differently:
-                     found       we searched and found coverage
-                     nothing     we searched and found none  (evidence AGAINST)
-                     unavailable we could not search          (no evidence at all)
-                   Collapsing the last two would show the reader a damning
-                   signal we never actually measured.
-                   ------------------------------------------------------------ #}
-                {% if analysis.web_check %}
-                {% with web=analysis.web_check %}
-                <div class="card mt-4 {% if web.status == 'found' %}border-primary{% else %}border-secondary{% endif %}">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-globe2 me-2"></i>What We Found Online
-                        </h5>
-
-                        {% if web.status == 'unavailable' %}
-                            <div class="alert alert-secondary mb-0">
-                                <i class="bi bi-wifi-off me-2"></i>
-                                <strong>Could not check.</strong>
-                                We tried to look this story up but the search did not
-                                complete{% if web.error %} ({{ web.error }}){% endif %}.
-                                This is <em>not</em> evidence either way — it only means
-                                the check failed. The verdict above stands on its own.
-                            </div>
-
-                        {% elif web.status == 'nothing' %}
-                            <div class="alert alert-warning mb-0">
-                                <i class="bi bi-search me-2"></i>
-                                <strong>No coverage found.</strong>
-                                We searched and could not find any news organisation
-                                reporting this story. That is a reason for suspicion, but
-                                not proof — genuinely new stories are sometimes carried by
-                                only one outlet at first.
-                            </div>
-
-                        {% else %}
-                            {% if web.summary %}
-                                <p class="mb-3">{{ web.summary }}</p>
-                            {% endif %}
-
-                            {% if web.factcheck_rating %}
-                                <div class="alert alert-dark py-2 mb-3">
-                                    <i class="bi bi-patch-check me-2"></i>
-                                    A fact-checker rated this:
-                                    <strong>{{ web.factcheck_rating }}</strong>
-                                </div>
-                            {% endif %}
-
-                            {% if web.reporting %}
-                                <p class="mb-1"><strong>Reporting this story:</strong></p>
-                                <p class="text-muted mb-3">{{ web.reporting|join:" · " }}</p>
-                            {% endif %}
-
-                            {% if web.debunking %}
-                                <p class="mb-1">
-                                    <strong>Calling it false or misleading:</strong>
-                                </p>
-                                <p class="text-muted mb-3">{{ web.debunking|join:" · " }}</p>
-                            {% endif %}
-
-                            {# The disagreement notice. This is the most useful thing
-                               on the page when it appears, so it is not buried. #}
-                            {% if web.verdict == 'REAL' and analysis.result_label == 'Likely Fake' %}
-                                <div class="alert alert-warning mb-3">
-                                    <i class="bi bi-exclamation-diamond me-2"></i>
-                                    <strong>These two disagree.</strong>
-                                    Our reader called this fake, but real news
-                                    organisations appear to be carrying the story. The
-                                    links below are stronger evidence than our guess —
-                                    read them before believing the verdict above.
-                                </div>
-                            {% elif web.verdict == 'FAKE' and analysis.result_label == 'Likely Real' %}
-                                <div class="alert alert-danger mb-3">
-                                    <i class="bi bi-exclamation-diamond me-2"></i>
-                                    <strong>These two disagree.</strong>
-                                    Our reader called this real, but what we found online
-                                    suggests it is false. Trust the links below over the
-                                    verdict above.
-                                </div>
-                            {% endif %}
-
-                            {% if web.sources %}
-                                <p class="mb-1"><strong>Pages we read:</strong></p>
-                                <ul class="small mb-0">
-                                    {% for source in web.sources %}
-                                    <li>
-                                        <a href="{{ source.url }}" target="_blank"
-                                           rel="noopener noreferrer">{{ source.title }}</a>
-                                    </li>
-                                    {% endfor %}
-                                </ul>
-                            {% endif %}
-                        {% endif %}
-
-                        <p class="text-muted small mt-3 mb-0">
-                            This search ran because our reader was unsure about this
-                            article. It is a second opinion gathered from the web, not a
-                            measured figure like the percentage above.
-                        </p>
-                    </div>
-                </div>
-                {% endwith %}
-                {% endif %}
-
-                <!-- The article we matched, so the reader can judge it themselves
-                     instead of only being handed a verdict. Only present when
-                     Step 1 found something. -->
-                {% if analysis.matched_headline %}
-                <div class="card mt-4 border-info">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-file-earmark-text me-2"></i>The Article We Matched
-                        </h5>
-                        <p class="fw-semibold mb-2">"{{ analysis.matched_headline }}"</p>
-                        {% if analysis.matched_extract %}
-                            <p class="text-muted small mb-0">{{ analysis.matched_extract }}</p>
-                        {% else %}
-                            <p class="text-muted small fst-italic mb-0">
-                                No article text was stored for this entry.
-                            </p>
-                        {% endif %}
-                    </div>
-                </div>
-                {% endif %}
-
-                <!-- Warning. Shown on EVERY result, deliberately.
-                     It used to be hidden for "Likely Real", which was safe only
-                     while that verdict came from an exact dataset match. The
-                     reading model now returns "Likely Real" too, and it is wrong
-                     more than a third of the time — precisely the case where a
-                     user most needs telling not to rely on it. -->
-                <div class="card mt-4 border-warning">
-                    <div class="card-body">
-                        <h6 class="fw-bold text-warning">
-                            <i class="bi bi-exclamation-triangle-fill me-2"></i>Warning
-                        </h6>
-                        {% if analysis.result_label == 'Not Sure' %}
-                        <p class="mb-0">
-                            "Not Sure" does not mean the article is fine, and it does
-                            not mean it is fake. It means this tool had nothing
-                            reliable to tell you about it. Check the story against
-                            several trusted outlets before believing or sharing it.
-                        </p>
-                        {% elif method == 'database' %}
-                        <p class="mb-0">
-                            This label was recorded by whoever assembled our dataset —
-                            it is a lookup, not an independent check of the article's
-                            claims. Always verify news against multiple trusted
-                            sources before sharing.
-                        </p>
-                        {% else %}
-                        <p class="mb-0">
-                            This verdict is a prediction from a machine-learning model,
-                            and the percentage above is how often verdicts like it turn
-                            out correct — which is nowhere near always. It is not a
-                            substitute for checking the story yourself. Always verify
-                            news against multiple trusted sources before sharing.
-                        </p>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="d-flex gap-3 mt-4 justify-content-center flex-wrap">
-                    <a href="{% url 'analyze' %}" class="btn btn-primary btn-lg" id="btn-analyze-another">
-                        <i class="bi bi-search me-2"></i>Analyze Another
-                    </a>
-                    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-lg" id="btn-view-dashboard">
-                        <i class="bi bi-bar-chart-line me-2"></i>View Dashboard
-                    </a>
-                </div>
-
-                <!-- Timestamp -->
-                <p class="text-center text-muted mt-3 small">
-                    <i class="bi bi-clock me-1"></i>
-                    Analyzed on {{ analysis.analyzed_at|date:"F j, Y" }} at {{ analysis.analyzed_at|time:"g:i A" }}
+        {% elif method == "reading_model" %}
+            {% if analysis.result_label == "Not Sure" %}
+            <div class="notice notice-plain">
+                <i class="bi bi-question-circle"></i>
+                <p>
+                    <strong>No verdict</strong> — this result was saved by an
+                    earlier version of the analyzer, which declined to answer on
+                    articles like this one.
                 </p>
             </div>
-        </div>
-    </div>
-</section>
-{% endblock %}
+            {% elif analysis.result_label == "Likely Real" %}
+            <div class="notice notice-yellow">
+                <i class="bi bi-robot"></i>
+                <p>
+                    <strong>Reading model — weaker verdict</strong> — this
+                    headline was not in our dataset, so our model read the
+                    writing itself. "Likely Real" is the less reliable of its two
+                    answers. Treat it as "nothing obviously wrong", not as
+                    clearance.
+                </p>
+            </div>
+            {% else %}
+            <div class="notice notice-yellow">
+                <i class="bi bi-robot"></i>
+                <p>
+                    <strong>Reading model — stronger verdict</strong> — this
+                    headline was not in our dataset, so our model read the
+                    writing itself. "Likely Fake" is the more reliable of its two
+                    answers, but it is still wrong sometimes. See below.
+                </p>
+            </div>
+            {% endif %}
 
+        {% elif method == "ml_prediction" %}
+        <div class="notice notice-coral">
+            <i class="bi bi-exclamation-triangle"></i>
+            <p>
+                <strong>Fallback word-counter</strong> — the reading model could
+                not be loaded, so an older and weaker model classified the text.
+                Its verdicts are less trustworthy; see the explanation below.
+            </p>
+        </div>
+        {% endif %}
+
+        {% comment %}
+        The bar carries no label of its own. The pill above it already reads
+        "86.9% of these verdicts are correct", and repeating that phrase here
+        through capfirst produced "Of these verdicts are correct" as a heading,
+        which is not a sentence. Skipped entirely for "Not Sure": there is no
+        trustworthy figure to draw.
+        {% endcomment %}
+        {% if confidence %}
+        <div class="meter">
+            <div class="meter-fill {% if analysis.result_label == 'Likely Real' %}meter-real{% else %}meter-fake{% endif %}"
+                 style="width: {{ confidence }}%;">{{ confidence }}%</div>
+        </div>
+        {% endif %}
+
+        {% comment %}
+        What the model actually looked at. It was trained with a 256 word-piece
+        window, which is roughly 200 words, so on a long paste it never saw the
+        end. Someone reading a verdict on a 400-word article deserves to know
+        which part of it was judged.
+        {% endcomment %}
+        {% if method == "reading_model" %}
+        <p class="small muted" style="margin-top: var(--space-md);">
+            <i class="bi bi-eye"></i>
+            Judged on roughly the first 200 words of what you pasted — that is as
+            much as the model reads at once.
+        </p>
+        {% endif %}
+    </section>
+
+    {# ── WHAT WE READ ──────────────────────────────────────────────────── #}
+    <section class="card in d2">
+        <h2 class="card-title"><i class="bi bi-newspaper"></i> What you submitted</h2>
+        <p class="quote">{{ analysis.headline }}</p>
+        {% if analysis.article_text %}
+        <div class="extract">{{ analysis.article_text|truncatewords:100 }}</div>
+        {% endif %}
+    </section>
+
+    {# ── THE FULL EXPLANATION ──────────────────────────────────────────── #}
+    <section class="card in d2">
+        <h2 class="card-title"><i class="bi bi-info-circle"></i> Full explanation</h2>
+        <p>{{ analysis.explanation }}</p>
+    </section>
+
+    {% comment %}
+    ── WHAT THE WEB SAYS ──
+    A SEPARATE answer, never merged into the verdict above, and when the two
+    disagree the page says so instead of quietly picking one.
+
+    Only present when the reading model was unsure — see
+    web_check.should_check(). Three states, deliberately worded differently:
+
+      found        we searched and found coverage
+      nothing      we searched and found none   (evidence AGAINST the story)
+      unavailable  we could not search          (no evidence about anything)
+
+    Collapsing the last two would show the reader a damning signal we never
+    actually measured.
+    {% endcomment %}
+    {% if analysis.web_check %}
+    {% with web=analysis.web_check %}
+    <section class="card card-tab {% if web.status == 'found' %}tab-mint{% else %}tab-yellow{% endif %} in d3">
+        <h2 class="card-title"><i class="bi bi-globe2"></i> What We Found Online</h2>
+
+        {% if web.status == 'unavailable' %}
+            <div class="notice notice-plain">
+                <i class="bi bi-wifi-off"></i>
+                <p>
+                    <strong>Could not check.</strong>
+                    We tried to look this story up but the search did not
+                    complete{% if web.error %} ({{ web.error }}){% endif %}.
+                    This is <em>not</em> evidence either way — it only means the
+                    check failed. The verdict above stands on its own.
+                </p>
+            </div>
+
+        {% elif web.status == 'nothing' %}
+            <div class="notice notice-yellow">
+                <i class="bi bi-search"></i>
+                <p>
+                    <strong>No coverage found.</strong>
+                    We searched and could not find any news organisation
+                    reporting this story. That is a reason for suspicion, but
+                    not proof — genuinely new stories are sometimes carried by
+                    only one outlet at first.
+                </p>
+            </div>
+
+        {% else %}
+            {% comment %}
+            The disagreement notice comes FIRST when it applies. It is the most
+            useful thing on the page, so it is not buried under the summary and
+            the outlet lists.
+            {% endcomment %}
+            {% if web.verdict == 'REAL' and analysis.result_label == 'Likely Fake' %}
+                <div class="notice notice-loud">
+                    <i class="bi bi-exclamation-diamond-fill"></i>
+                    <p>
+                        <strong>These two disagree.</strong>
+                        Our reader called this fake, but real news organisations
+                        appear to be carrying the story. The links below are
+                        stronger evidence than our guess — read them before
+                        believing the verdict above.
+                    </p>
+                </div>
+            {% elif web.verdict == 'FAKE' and analysis.result_label == 'Likely Real' %}
+                <div class="notice notice-loud">
+                    <i class="bi bi-exclamation-diamond-fill"></i>
+                    <p>
+                        <strong>These two disagree.</strong>
+                        Our reader called this real, but what we found online
+                        suggests it is false. Trust the links below over the
+                        verdict above.
+                    </p>
+                </div>
+            {% endif %}
+
+            {% if web.summary %}
+                <p>{{ web.summary }}</p>
+            {% endif %}
+
+            {% if web.factcheck_rating %}
+                <div class="notice notice-coral" style="margin-top: var(--space-md);">
+                    <i class="bi bi-patch-check-fill"></i>
+                    <p>A fact-checker rated this: <strong>{{ web.factcheck_rating }}</strong></p>
+                </div>
+            {% endif %}
+
+            {% if web.reporting %}
+                <p class="small" style="margin-top: var(--space-md);">
+                    <strong>Reporting this story</strong>
+                </p>
+                <div class="outlets">
+                    {% for outlet in web.reporting %}
+                    <span class="pill pill-mint pill-flat">{{ outlet }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% if web.debunking %}
+                <p class="small" style="margin-top: var(--space-md);">
+                    <strong>Calling it false or misleading</strong>
+                </p>
+                <div class="outlets">
+                    {% for outlet in web.debunking %}
+                    <span class="pill pill-coral pill-flat">{{ outlet }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% if web.sources %}
+                <p class="small" style="margin-top: var(--space-md);">
+                    <strong>Pages we read</strong>
+                </p>
+                <ul class="source-list">
+                    {% for source in web.sources %}
+                    <li>
+                        <span class="dot dot-mint"></span>
+                        <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.title }}</a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        {% endif %}
+
+        <p class="small muted" style="margin-top: var(--space-md);">
+            This search ran because our reader was unsure about this article. It
+            is a second opinion gathered from the web, not a measured figure like
+            the percentage above.
+        </p>
+    </section>
+    {% endwith %}
+    {% endif %}
+
+    {% comment %}
+    ── THE MATCHED ARTICLE ──
+    So the reader can judge it themselves instead of only being handed a
+    verdict. Only present when Step 1 found something.
+    {% endcomment %}
+    {% if analysis.matched_headline %}
+    <section class="card card-tab tab-lavender in d3">
+        <h2 class="card-title"><i class="bi bi-file-earmark-text"></i> The Article We Matched</h2>
+        <p class="quote">{{ analysis.matched_headline }}</p>
+        {% if analysis.matched_extract %}
+            <div class="extract">{{ analysis.matched_extract }}</div>
+        {% else %}
+            <div class="extract"><em>No article text was stored for this entry.</em></div>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    {% comment %}
+    ── THE WARNING ──
+    On EVERY result, deliberately. It used to be hidden for "Likely Real", which
+    was safe only while that verdict came from an exact dataset match. The
+    reading model returns "Likely Real" too, and that is its weaker answer —
+    precisely the case where a user most needs telling not to rely on it.
+    {% endcomment %}
+    <section class="card card-tab tab-coral in d3">
+        <h2 class="card-title"><i class="bi bi-exclamation-triangle-fill"></i> Before you share this</h2>
+        {% if analysis.result_label == 'Not Sure' %}
+        <p>
+            "Not Sure" does not mean the article is fine, and it does not mean it
+            is fake. It means this tool had nothing reliable to tell you about
+            it. Check the story against several trusted outlets before believing
+            or sharing it.
+        </p>
+        {% elif method == 'database' %}
+        <p>
+            This label was recorded by whoever assembled our dataset — it is a
+            lookup, not an independent check of the article's claims. Always
+            verify news against multiple trusted sources before sharing.
+        </p>
+        {% else %}
+        <p>
+            This verdict is a prediction from a machine-learning model, and the
+            percentage above is how often verdicts like it turn out correct —
+            which is nowhere near always. It is not a substitute for checking the
+            story yourself. Always verify news against multiple trusted sources
+            before sharing.
+        </p>
+        {% endif %}
+    </section>
+
+    <div class="btn-row btn-row-center">
+        <a href="{% url 'analyze' %}" class="btn btn-primary" id="btn-analyze-another">
+            <i class="bi bi-search"></i> Analyze another
+        </a>
+        <a href="{% url 'dashboard' %}" class="btn btn-ghost" id="btn-view-dashboard">
+            <i class="bi bi-bar-chart-line"></i> View dashboard
+        </a>
+    </div>
+
+    <p class="center small muted">
+        <i class="bi bi-clock"></i>
+        Analyzed on {{ analysis.analyzed_at|date:"F j, Y" }} at {{ analysis.analyzed_at|time:"g:i A" }}
+    </p>
+
+</div>
+{% endblock %}

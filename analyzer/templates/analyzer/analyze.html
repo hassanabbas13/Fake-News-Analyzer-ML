@@ -1,63 +1,142 @@
-<!--
-analyze.html — Analysis Input Form
-=====================================
-Users enter a headline (required) and optional article text.
-On submit, the form POSTs to the same URL, which triggers analysis.
--->
 {% extends "analyzer/base.html" %}
+{% comment %}
+analyze.html — the input page
+=============================
+One textarea. First line is treated as the headline, the rest as the body —
+see views.analyze(), which splits on the first newline.
+
+The word counter is the only piece of logic on this page, and it exists because
+the server rejects input outside 25-400 words. Finding that out after submitting
+means losing your paste and the page you were reading it on. It reads its limits
+from data- attributes on the textarea (set in forms.py from input_check.py), so
+there is no second copy of the numbers to go stale.
+
+It advises, it never blocks. The counter runs on the browser's idea of a word;
+clean_news_content() runs on Python's. They agree on English prose, and where
+they might not, the server is the one that decides.
+{% endcomment %}
 
 {% block title %}Analyze News — Fake News Analyzer{% endblock %}
+{% block nav_analyze %}active{% endblock %}
 
 {% block content %}
-<section class="analyze-section">
-    <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-lg-8">
-                <div class="text-center mb-4">
-                    <h1 class="fw-bold">
-                        <i class="bi bi-search text-primary me-2"></i>Analyze News
-                    </h1>
-                    <p class="text-muted">
-                        Enter a news headline and article text to check for fake news indicators.
-                    </p>
-                </div>
-                
-                <div class="card analysis-card">
-                    <div class="card-body p-4 p-md-5">
-                        <!-- Django form — uses POST method with CSRF protection -->
-                        <form method="POST" action="{% url 'analyze' %}" id="analyze-form">
-                            {% csrf_token %}
-                            
-                            <!-- Single Content Input -->
-                            <div class="mb-4">
-                                <label for="content-input" class="form-label fw-semibold">
-                                    <i class="bi bi-file-text me-1"></i>Paste News or Article
-                                    <span class="text-danger">*</span>
-                                </label>
-                                {{ form.news_content }}
-                                {% if form.news_content.errors %}
-                                    <div class="text-danger small mt-1">
-                                        {{ form.news_content.errors }}
-                                    </div>
-                                {% endif %}
-                            </div>
-                            
-                            <!-- Submit Button -->
-                            <div class="d-grid">
-                                <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">
-                                    <i class="bi bi-cpu me-2"></i>Analyze Now
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+<div class="wrap">
 
-                <p class="text-muted small text-center mt-3">
-                    <i class="bi bi-info-circle me-1"></i>
-                    Tip: put the headline on the first line and the article body below it.
-                </p>
-            </div>
-        </div>
+    <div class="center in" style="margin-bottom: var(--space-lg);">
+        <h1 style="font-size: 34px;">Check a story</h1>
+        <p class="muted" style="margin-top: 6px;">
+            Headline on the first line, the article underneath.
+        </p>
     </div>
-</section>
+
+    <form method="POST" action="{% url 'analyze' %}" id="analyze-form"
+          class="card card-lg card-tab tab-mint in d1">
+        {% csrf_token %}
+
+        <label class="field-label" for="content-input">
+            <i class="bi bi-file-text"></i>
+            Paste news or article
+            <span class="req">*</span>
+        </label>
+
+        {{ form.news_content }}
+
+        {% if form.news_content.errors %}
+        <div class="field-error" role="alert">
+            <i class="bi bi-x-octagon-fill"></i>
+            <ul>
+                {% for error in form.news_content.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="field-foot">
+            <span class="field-help" id="count-hint">{{ form.news_content.help_text }}</span>
+            <span class="counter" id="word-count" aria-live="polite">0 words</span>
+        </div>
+
+        <div style="margin-top: var(--space-lg);">
+            <button type="submit" class="btn btn-primary btn-lg btn-block" id="submit-btn">
+                <i class="bi bi-cpu"></i> Analyze now
+            </button>
+        </div>
+    </form>
+
+    <div class="notice notice-lavender in d2" style="margin-top: var(--space-lg);">
+        <i class="bi bi-lightbulb"></i>
+        <p>
+            <strong>Tip.</strong> Put the headline on its own first line. That is
+            the line we look up in the fact-check database, and a match there is
+            worth more than anything the model can guess.
+        </p>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+/*
+ * Live word count.
+ *
+ * The pattern matches Python's re.findall(r"[\w'-]+", ...) in
+ * input_check.word_count(), so the two agree. Not perfectly: JavaScript's \w is
+ * ASCII-only while Python's is Unicode-aware, so an accented word counts here
+ * and there in different ways. That difference does not matter, because this
+ * counter only ever advises — the server decides, and this page never claims
+ * otherwise.
+ */
+(function () {
+    var box = document.getElementById('content-input');
+    var out = document.getElementById('word-count');
+    var hint = document.getElementById('count-hint');
+    if (!box || !out) { return; }
+
+    var MIN = parseInt(box.dataset.minWords, 10) || 25;
+    var MAX = parseInt(box.dataset.maxWords, 10) || 400;
+    var DEFAULT_HINT = hint ? hint.textContent : '';
+
+    function update() {
+        var found = box.value.match(/[\w'-]+/g);
+        var n = found ? found.length : 0;
+
+        out.textContent = n.toLocaleString() + ' / ' + MAX + ' words';
+        out.classList.remove('ok', 'short', 'over');
+
+        if (n === 0) {
+            if (hint) { hint.textContent = DEFAULT_HINT; }
+            out.textContent = '0 words';
+            return;
+        }
+
+        if (n > MAX) {
+            out.classList.add('over');
+            if (hint) {
+                hint.textContent = (n - MAX).toLocaleString() +
+                    ' words too many — trim it to the headline and the first few paragraphs.';
+            }
+        } else if (n < MIN) {
+            // Short input is still accepted. It only fails if the headline turns
+            // out not to be in the database, and this says so rather than
+            // pretending the form will reject it.
+            out.classList.add('short');
+            if (hint) {
+                hint.textContent = 'Short. We can still answer if this exact headline is ' +
+                    'in our records — otherwise add ' + (MIN - n) + ' more word' +
+                    (MIN - n === 1 ? '' : 's') + ' for the model to read.';
+            }
+        } else {
+            out.classList.add('ok');
+            if (hint) {
+                hint.textContent = 'Good length. The model reads roughly the first 200 words.';
+            }
+        }
+    }
+
+    box.addEventListener('input', update);
+    update();  // a browser-restored paste is already there on load
+})();
+</script>
 {% endblock %}

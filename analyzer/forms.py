@@ -41,6 +41,13 @@ class NewsInputForm(forms.Form):
             # counts characters, and the real rule is words, so the server still
             # has the final say.
             'maxlength': MAX_WORDS * 12,
+            # The live word counter on the analyze page reads its limits from
+            # these two attributes rather than carrying its own copy. There is
+            # one source of truth for the numbers — input_check.py — and this is
+            # how it reaches the browser, so the counter cannot drift out of
+            # step with the rule the server actually enforces.
+            'data-min-words': MIN_WORDS,
+            'data-max-words': MAX_WORDS,
         }),
         help_text=(f'English only, between {MIN_WORDS} and {MAX_WORDS} words. '
                    f'The model reads roughly the first 200 words.'),

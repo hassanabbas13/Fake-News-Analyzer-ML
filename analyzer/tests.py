@@ -946,3 +946,82 @@ class TooShortForModelTests(KnownArticleMixin, TestCase):
 
         self.assertEqual(result['method'], 'database')
         self.assertEqual(result['label'], 'Likely Fake')
+
+
+class TemplateRenderTests(KnownArticleMixin, TestCase):
+    """
+    Every page must render to finished HTML, with no template source left in it.
+
+    This class exists because of a bug nothing else caught. Django's {# #}
+    comment is SINGLE-LINE ONLY: written across several lines it stops being a
+    comment, and the whole block — design notes, section banners and all — is
+    printed into the page for the reader to see. Four templates were doing it.
+
+    The suite missed it because every other test asserts that something SHOULD
+    be present. Nothing asserted on what should be absent, and leaked comments
+    are invisible to a test looking for 'Likely Fake' in the response. So these
+    check the opposite direction, once per page.
+    """
+
+    # Any of these surviving into the response means the template did not fully
+    # render. Checked as raw text, since a real page has no reason to contain
+    # them and Django escapes anything a user could paste that did.
+    LEAKS = ('{#', '{%', '{{', 'endcomment')
+
+    def _assert_clean(self, response):
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        for leak in self.LEAKS:
+            self.assertNotIn(
+                leak, body,
+                f"unrendered template syntax {leak!r} reached the page — a "
+                f"multi-line {{# #}} comment is the usual cause; use "
+                f"{{% comment %}} instead")
+
+    def test_home_renders_clean(self):
+        self._assert_clean(self.client.get(reverse('home')))
+
+    def test_analyze_renders_clean(self):
+        self._assert_clean(self.client.get(reverse('analyze')))
+
+    def test_refused_input_renders_clean(self):
+        """The validation-error path renders different markup, so check it too."""
+        response = self.client.post(reverse('analyze'),
+                                    {'news_content': 'یہ اردو میں لکھا گیا ہے'})
+        self._assert_clean(response)
+        self.assertContains(response, 'only read English')
+
+    def test_empty_dashboard_renders_clean(self):
+        self._assert_clean(self.client.get(reverse('dashboard')))
+
+    def test_populated_dashboard_renders_clean(self):
+        self.client.post(reverse('analyze'), {'news_content': KNOWN_FAKE})
+        self._assert_clean(self.client.get(reverse('dashboard')))
+
+    def test_result_renders_clean(self):
+        """A result with a web check, so the online block renders as well."""
+        row = NewsAnalysis.objects.create(
+            headline='Render probe',
+            article_text='Body.',
+            score=0.5,
+            result_label='Likely Fake',
+            explanation='Probe.',
+            confidence=86.9,
+            method='reading_model',
+            web_check={
+                'status': 'found', 'verdict': 'REAL', 'confidence': 'high',
+                'summary': 'Widely reported.', 'reporting': ['BBC'],
+                'debunking': [], 'factcheck_rating': None,
+                'sources': [{'title': 'BBC News', 'url': 'https://bbc.co.uk'}],
+                'queries': [], 'error': None, 'elapsed': 4.1,
+            },
+        )
+
+        self._assert_clean(self.client.get(reverse('result', args=[row.id])))
+
+    def test_database_result_renders_clean(self):
+        """The Step 1 path shows the matched article, which no other case does."""
+        self.client.post(reverse('analyze'), {'news_content': KNOWN_FAKE})
+        row = NewsAnalysis.objects.latest('id')
+
+        self._assert_clean(self.client.get(reverse('result', args=[row.id])))
