@@ -35,7 +35,12 @@ from .input_check import check_long_enough
 from .web_check import check_online, should_check
 
 # --- The old TF-IDF word-counter: Step 2's fallback -------------------------
-# Loaded once at import and kept in memory.
+# Loaded once at import and kept in memory. Absent from a fresh clone on
+# purpose: it is not shipped, because it is much weaker than the reading model
+# and calls ordinary news fake at around 51%, which is a coin toss. It stays as
+# a fallback only for machines that cannot install torch. Silence here is
+# correct — the reading model loads a few lines down, and a warning about a
+# fallback nobody is using would read as a broken install.
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _model_path = os.path.join(_current_dir, 'model.pkl')
@@ -52,7 +57,6 @@ except FileNotFoundError:
     _model = None
     _vectorizer = None
     _ml_ready = False
-    print("WARNING: model.pkl or vectorizer.pkl not found. ML predictions disabled.")
 
 # Missing metadata means we quote no accuracy figure at all rather than guess one.
 try:
@@ -60,7 +64,6 @@ try:
         _model_meta = json.load(f)
 except (FileNotFoundError, ValueError):
     _model_meta = None
-    print("NOTE: model_meta.json not found. The app will not quote a model accuracy.")
 
 # Must match how the model was trained, or its answers quietly turn to noise.
 # train_honest_model.py sets 'text_cleaned'; train_mega_model.py does not.
@@ -125,8 +128,8 @@ def _load_reading_model():
     _reading_cache = False  # assume failure; overwritten on success
 
     if not os.path.isdir(_reading_dir):
-        print("NOTE: analyzer/reading_model/ not found. "
-              "Step 2 will use the old word-counter.")
+        print("WARNING: analyzer/reading_model/ not found, so the reading model "
+              "cannot answer. Run 'python setup.py' to fetch it.")
         return None
 
     # Without cutoff.json there is no honest figure to show beside a verdict, so
@@ -152,8 +155,8 @@ def _load_reading_model():
                                   AutoTokenizer)
     except ImportError:
         print("NOTE: torch/transformers not installed, so the reading model "
-              "cannot run. Step 2 will use the old word-counter. "
-              "Install them with: python -m pip install -r requirements.txt")
+              "cannot run. Install them with: "
+              "python -m pip install -r requirements.txt")
         return None
 
     try:
@@ -164,8 +167,19 @@ def _load_reading_model():
         model = AutoModelForSequenceClassification.from_pretrained(_reading_dir)
         model.eval()
     except Exception as problem:  # noqa: BLE001 - any failure means fall back
-        print(f"NOTE: the reading model failed to load ({problem}). "
-              f"Step 2 will use the old word-counter.")
+        # The likeliest cause on a fresh clone is a git-lfs placeholder: the
+        # file is present but is a 134-byte pointer, because the free LFS
+        # bandwidth ran out. Say so, rather than passing on a transformers
+        # error about a corrupt archive that explains nothing.
+        hint = ''
+        try:
+            weights = os.path.join(_reading_dir, 'model.safetensors')
+            if os.path.exists(weights) and os.path.getsize(weights) < 1_000_000:
+                hint = (" The model file is only a git-lfs placeholder, not the "
+                        "real weights. Run 'python setup.py' to fetch it.")
+        except OSError:
+            pass
+        print(f"WARNING: the reading model failed to load ({problem}).{hint}")
         return None
 
     _reading_cache = {

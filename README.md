@@ -98,7 +98,7 @@ python manage.py runserver
 
 That is the whole setup. The trained model and the 59,660-article database come down with the clone, so the app works properly from the first run — no training, no data loading.
 
-> `torch` and `transformers` are roughly 2.5 GB installed. Skip them and the app still runs, with Step 2 falling back to the old TF-IDF word-counter; the result page says which one answered. No GPU needed, about 0.2 seconds per article.
+> `torch` and `transformers` are roughly 2.5 GB installed. They are what runs the reading model, so skipping them leaves the app able to answer only from the database.
 
 ### If the model or database didn't arrive
 
@@ -111,7 +111,7 @@ python setup.py            # fetches them from the GitHub Release instead
 
 The Release has no bandwidth limit, so this always works. The script writes to a `.part` file and only moves it into place when the download completes, so an interrupted download can't leave a corrupt model behind.
 
-Nothing breaks if you ignore this — a missing database just means Step 1 never matches, and a missing model means Step 2 uses the word-counter. The app tells you on the page which one answered.
+If you skip it: a missing database means Step 1 never matches, and a missing model means the app says **"analysis unavailable"** rather than guessing. It won't invent a verdict to fill the gap.
 
 ### Optional: the web search second opinion
 
@@ -171,13 +171,17 @@ Use `--basis fact_check` only when a fact-checker actually investigated the clai
 python tune_cutoff.py
 ```
 
-`tune_cutoff.py` writes `analyzer/reading_model/cutoff.json`. Without that file the app won't touch the reading model at all and falls back to the word-counter. That's deliberate: no measurement means no honest figure to put beside a verdict, and quoting the model's own confidence is exactly what this project refuses to do.
+`tune_cutoff.py` writes `analyzer/reading_model/cutoff.json`. Without that file the app won't touch the reading model at all. That's deliberate: no measurement means no honest figure to put beside a verdict, and quoting the model's own confidence is exactly what this project refuses to do.
 
-Fallback word-counter, if you want it built too:
+### The old word-counter
+
+A TF-IDF classifier, kept as a fallback for machines that can't install PyTorch. **Not shipped**, and off by default, because it is much weaker than the reading model — it rates an ordinary council-funding story as fake at 51%, which is a coin toss. If you want it anyway:
 
 ```bash
 python train_honest_model.py    # writes model.pkl, vectorizer.pkl, model_meta.json
 ```
+
+Build it and the app uses it only when the reading model can't load, and labels the result as having come from the word-counter.
 
 ---
 
@@ -223,7 +227,7 @@ analyzer/
   templates/analyzer/   base, home, analyze, result, dashboard
   static/analyzer/      neo-brutalist stylesheet, no Bootstrap CSS
   reading_model/        fine-tuned DistilBERT + cutoff.json   (ships via git-lfs)
-  model.pkl             fallback TF-IDF classifier            (generated, gitignored)
+  model.pkl             optional TF-IDF fallback               (not shipped)
 
 fake_news_project/      settings, urls, wsgi
 db.sqlite3              the 59,660-article corpus             (ships via git-lfs)
