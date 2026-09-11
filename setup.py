@@ -26,7 +26,7 @@ import sys
 import urllib.error
 import urllib.request
 
-RELEASE = ('https://github.com/hassanabbas13/Fake-News-Analyzer-/'
+RELEASE = ('https://github.com/hassanabbas13/Fake-News-Analyzer-ML/'
            'releases/download/v1.0')
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +40,7 @@ FILES = [
         'url': f'{RELEASE}/model.safetensors',
         'expected_mb': 200,
         'what': 'the trained reading model',
-        'without_it': 'the app falls back to the old word-counter',
+        'without_it': 'the app reports "analysis unavailable" instead of guessing',
     },
     {
         'path': 'db.sqlite3',
