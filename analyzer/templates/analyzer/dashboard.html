@@ -1,13 +1,12 @@
 {% extends "analyzer/base.html" %}
 {% comment %}
-dashboard.html — what this app has been asked so far
-====================================================
-Counts of verdicts and how they were reached. Note what these numbers are NOT:
-they are not accuracy. Nobody has told this app whether any of these verdicts
-was right. "64% Likely Fake" means 64% of the things people pasted came back
-fake, which says more about what people paste than about the model.
+Counts of verdicts and how they were reached. Charts are Chart.js, fed by
+/api/dashboard-data/.
 
-Charts are Chart.js, fed by /api/dashboard-data/.
+Note what these numbers are NOT: they are not accuracy. Nobody has told this app
+whether any of these verdicts was right. "64% Likely Fake" means 64% of the
+things people pasted came back fake, which says more about what people paste than
+about the model.
 {% endcomment %}
 
 {% block title %}Dashboard — Fake News Analyzer{% endblock %}
@@ -19,7 +18,7 @@ Charts are Chart.js, fed by /api/dashboard-data/.
     <div class="center in">
         <h1 style="font-size: 34px;">Dashboard</h1>
         <p class="muted" style="margin-top: 6px;">
-            Every story this app has been asked about, and how it answered.
+            Every story this app has been asked about and how it answered.
         </p>
     </div>
 
@@ -56,11 +55,7 @@ Charts are Chart.js, fed by /api/dashboard-data/.
             <div class="stat-num">{{ fake_count }}</div>
             <div class="stat-label">Likely Fake · {{ fake_pct }}%</div>
         </div>
-        {% comment %}
-        Counted explicitly rather than lumped in anywhere. Since Step 2 stopped
-        guessing, "Not Sure" is a real outcome, and three numbers that did not
-        add up to the total would just look broken.
-        {% endcomment %}
+        {# Counted explicitly, so the four numbers add up to the total. #}
         <div class="stat stat-unsure">
             <i class="bi bi-question-circle"></i>
             <div class="stat-num">{{ unsure_count }}</div>
@@ -82,7 +77,23 @@ Charts are Chart.js, fed by /api/dashboard-data/.
 
     {# ── RECENT ────────────────────────────────────────────────────────── #}
     <section class="card in d3">
-        <h2 class="card-title"><i class="bi bi-clock-history"></i> Recent</h2>
+        {% comment %}
+        Clear all is a POST form, not a link: a delete a GET can trigger is one a
+        browser prefetch or a crawler can trigger, and this app has no login. The
+        confirm() is a courtesy for whoever clicked; the hidden confirm=DELETE
+        field, checked server-side, is what stops a stray POST.
+        {% endcomment %}
+        <div class="card-head">
+            <h2 class="card-title"><i class="bi bi-clock-history"></i> Recent</h2>
+            <form method="POST" action="{% url 'clear_analyses' %}"
+                  onsubmit="return confirm('Delete all {{ total }} saved {% if total == 1 %}analysis{% else %}analyses{% endif %}? This cannot be undone.');">
+                {% csrf_token %}
+                <input type="hidden" name="confirm" value="DELETE">
+                <button type="submit" class="btn btn-sm btn-danger" id="btn-clear-all">
+                    <i class="bi bi-trash3"></i> Clear all
+                </button>
+            </form>
+        </div>
         <div class="table-scroll">
             <table id="analyses-table">
                 <thead>
@@ -99,7 +110,8 @@ Charts are Chart.js, fed by /api/dashboard-data/.
                 <tbody>
                     {% for item in recent %}
                     <tr>
-                        <td class="muted">{{ item.id }}</td>
+                        {# Bottom-to-top numbering from views.dashboard(). Not the id, not forloop.counter. #}
+                        <td class="muted">{{ item.row_number }}</td>
                         <td class="cell-headline">{{ item.headline|truncatewords:12 }}</td>
                         <td>
                             {% if item.result_label == 'Likely Real' %}
@@ -127,7 +139,19 @@ Charts are Chart.js, fed by /api/dashboard-data/.
                         </td>
                         <td class="muted" style="white-space: nowrap;">{{ item.analyzed_at|date:"M j, Y" }}</td>
                         <td>
-                            <a href="{% url 'result' item.id %}" class="btn btn-sm">View</a>
+                            <div class="row-actions">
+                                <a href="{% url 'result' item.id %}" class="btn btn-sm">View</a>
+                                {# POST + CSRF, same reasoning as Clear all above. #}
+                                <form method="POST" action="{% url 'delete_analysis' item.id %}"
+                                      onsubmit="return confirm('Delete this analysis?');">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-danger btn-icon"
+                                            title="Delete this analysis"
+                                            aria-label="Delete analysis of {{ item.headline|truncatewords:6 }}">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>
+                                </form>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -135,15 +159,6 @@ Charts are Chart.js, fed by /api/dashboard-data/.
             </table>
         </div>
     </section>
-
-    <div class="notice notice-plain in d3">
-        <i class="bi bi-info-circle"></i>
-        <p>
-            These are counts of what the app <em>said</em>, not of what was true.
-            Nobody has checked these verdicts against reality, so the split above
-            describes the stories people pasted — not how accurate the model is.
-        </p>
-    </div>
 
     {% endif %}
 
@@ -155,12 +170,9 @@ Charts are Chart.js, fed by /api/dashboard-data/.
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 /*
- * Dashboard charts.
- *
- * Colours are taken from the palette in style.css and mean the same things they
- * mean everywhere else in the app: mint is real, coral is fake, lavender is
- * "came from the database" or "no verdict". A chart that coloured these
- * differently from the badges beside it would be actively misleading.
+ * Colours come from the palette in style.css and mean what they mean everywhere
+ * else: mint is real, coral is fake, lavender is database or no-verdict. A chart
+ * coloured differently from the badges beside it would mislead.
  */
 const INK    = '#1A1A1A';
 const MINT   = '#A8E6CF';

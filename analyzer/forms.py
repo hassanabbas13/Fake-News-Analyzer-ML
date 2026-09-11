@@ -1,32 +1,20 @@
 """
-forms.py — Django Form for User Input
-=======================================
+The one input form: a textarea for the article, plus an opt-in web search.
 
-Django forms handle:
-1. Rendering HTML form fields
-2. Validating user input
-3. Cleaning/sanitizing data
-
-We have ONE form: NewsInputForm
-
-Validation matters more here than in most forms. The reading model cannot say
-"I cannot read this" — it was only ever taught to tell English fake news from
-English real news, so Urdu, Spanish, emoji and keyboard mash all come out as a
-confident "Likely Fake". Worse, the result page would quote the measured 86.9%
-reliability alongside it, which was measured on English news and means nothing
-here. Stopping bad input at the form is what keeps the app from inventing a
-statistic. See analyzer/input_check.py for the measurements behind each rule.
+Validation matters here because the model cannot say "I cannot read this" — Urdu,
+emoji and keyboard mash all come out as a confident "Likely Fake" beside a
+reliability figure measured on English news. See input_check.py for the rules.
 """
 
 from django import forms
 
 from .input_check import MAX_WORDS, MIN_WORDS, check_input
+from .web_check import has_key
 
 
 class NewsInputForm(forms.Form):
-    """
-    Form for users to enter a news headline or full article text.
-    """
+    """Headline on the first line, article body underneath. Split in views.py."""
+
     news_content = forms.CharField(
         label='News or Article Text',
         required=True,
@@ -36,31 +24,53 @@ class NewsInputForm(forms.Form):
                             f'{MIN_WORDS} to {MAX_WORDS} words...'),
             'rows': 6,
             'id': 'content-input',
-            # The browser's own counter, so someone pasting a long article finds
-            # out before they submit rather than after. Generous by design: this
-            # counts characters, and the real rule is words, so the server still
-            # has the final say.
+            # Deliberately generous: this counts characters and the real rule is
+            # words, so the server still has the final say.
             'maxlength': MAX_WORDS * 12,
-            # The live word counter on the analyze page reads its limits from
-            # these two attributes rather than carrying its own copy. There is
-            # one source of truth for the numbers — input_check.py — and this is
-            # how it reaches the browser, so the counter cannot drift out of
-            # step with the rule the server actually enforces.
+            # How the limits reach the live counter in analyze.html. One source of
+            # truth for the numbers — input_check.py — so the counter cannot drift
+            # out of step with the rule the server enforces.
             'data-min-words': MIN_WORDS,
             'data-max-words': MAX_WORDS,
         }),
-        help_text=(f'English only, between {MIN_WORDS} and {MAX_WORDS} words. '
-                   f'The model reads roughly the first 200 words.'),
+        # No help_text on purpose: the placeholder above the box and the counter
+        # beside it already say the same thing.
     )
 
-    def clean_news_content(self):
-        """
-        Refuse anything the model cannot honestly judge.
+    # An ADDITION to the automatic search, not a replacement. should_check() still
+    # searches on its own inside the unsure band, ticked or not, because the reader
+    # never sees the raw score and cannot tell which articles are guesses. This box
+    # only widens the net to the confident ones. Off by default: the free
+    # allowance is 500 grounded searches a day.
+    search_web = forms.BooleanField(
+        label='Also check the web',
+        required=False,
+        initial=False,
+        widget=forms.CheckboxInput(attrs={
+            'class': 'field-check-box',
+            'id': 'search-web',
+        }),
+        help_text=('Looks the story up online even when the model is sure. '
+                   'Skipped when the article is already in our dataset.'),
+    )
 
-        Returning a verdict on unreadable input would be worse than refusing:
-        the page states how often that verdict is right, and that figure was
-        measured on English news articles only.
-        """
+    def __init__(self, *args, **kwargs):
+        """Drop the checkbox when there is no API key, rather than offering a box
+        that could only ever come back 'unavailable'. has_key() is a file and
+        environment read, no network."""
+        super().__init__(*args, **kwargs)
+        if not has_key():
+            del self.fields['search_web']
+
+    def wants_web_search(self):
+        """True only if the box is present, ticked and the form validated, so the
+        view never has to know the field can be absent."""
+        return bool(self.cleaned_data.get('search_web'))
+
+    def clean_news_content(self):
+        """Refuse anything the model cannot honestly judge. A verdict on unreadable
+        input is worse than refusing, because the page quotes a reliability figure
+        beside it that was measured on English news only."""
         content = self.cleaned_data['news_content'].strip()
 
         problem = check_input(content)

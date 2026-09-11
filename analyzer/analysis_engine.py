@@ -1,59 +1,28 @@
 """
-analysis_engine.py — Hybrid Fake News Analyzer
-=================================================
+The hybrid analyzer. Three steps, in order, first answer wins.
 
-This is the MOST IMPORTANT file in the project.
-It classifies news in three steps:
+  1. Database fact-check. Two exact lookups against the corpus — tidied headline,
+     then the article's tidied opening words. Two keys because headlines are
+     fragile: drop "(VIDEO)" off the end and a story we hold a fact-check for
+     stops being recognisable.
+  2. The reading model, a fine-tuned DistilBERT. Text too short to read is turned
+     away first: asked about the single word "news" it answered 99.8% fake.
+  3. The web search, where Step 2 is unreliable or the reader asked. Shown BESIDE
+     the verdict, never merged into it. See web_check.py.
 
-  Step 1: Database Fact-Check
-    Search our database of known articles.
-    If the headline matches one exactly, return that dataset's label.
+THE PERCENTAGE SHOWN IS NOT THE MODEL'S CONFIDENCE. The model's own certainty is
+worthless — it routinely reports 99% while being wrong — so what the app reports
+is the measured reliability of that KIND of verdict, read live from cutoff.json.
+The two directions are quoted separately, because one overall figure would hide
+it whenever one verdict became much weaker than the other.
 
-  Step 2: The Reading Model
-    If the headline is not in our database, a fine-tuned DistilBERT model reads
-    the text and scores how fake it looks. Above the measured cutoff it says
-    "Likely Fake", below it "Likely Real" — every article gets an answer.
+Do not write any of those figures into this file. The article count is counted
+live, training scores come from model_meta.json, per-verdict reliability from
+cutoff.json. An earlier version of this docstring quoted 74% and 65% and went on
+quoting them through two retrainings after they stopped being true.
 
-    Before that, input_check.check_long_enough() turns away anything too short
-    to read. The model has no way to say "that is not enough to go on": asked
-    about the single word "news" it answered 99.8% fake.
-
-  Step 3: The Web Search (only where Step 2 is unreliable)
-    web_check.py asks Gemini to search the web, but only for scores inside the
-    unsure band that tune_cutoff.py measured — see cutoff.json. Its answer is
-    shown BESIDE the verdict, never merged into it. Details in web_check.py.
-
-THE PERCENTAGE SHOWN IS NOT THE MODEL'S CONFIDENCE
----------------------------------------------------
-This matters more than anything else in this file. The model's own certainty is
-worthless: it routinely reports 99% while being wrong. Quoting that number would
-tell users the opposite of the truth.
-
-So what the app reports instead is the measured reliability of that KIND of
-verdict, read live from reading_model/cutoff.json, which tune_cutoff.py writes.
-As of 20 August 2026 that is about 87% for "Likely Fake" and 90% for "Likely
-Real", from 3,160 articles in a collection the model never learned from.
-
-Those two figures are quoted separately on purpose. A single overall accuracy
-would hide it whenever one direction becomes much less trustworthy than the
-other — which was true of every earlier model here, and could be true again.
-
-Do not write either figure into this file. They are approximate here only to
-explain the idea; every number the app shows comes from cutoff.json at runtime.
-An earlier version of this docstring quoted 74% and 65%, and went on quoting
-them for two retrainings after they stopped being true.
-
-NOTE ON NUMBERS: nothing here hardcodes how big the database is or how accurate
-the model is. The article count is counted live from the database, the model's
-training scores are read from reading_model/model_meta.json, and how reliable
-each verdict is comes from reading_model/cutoff.json, which tune_cutoff.py
-writes at measurement time. Reloading the data, retraining the model or
-re-measuring it therefore updates what the app tells users automatically,
-instead of leaving a stale figure baked into the text.
-
-If the reading model cannot be loaded — torch not installed, files missing, or
-never measured — Step 2 falls back to the old TF-IDF word-counter so the app
-keeps working.
+If the reading model cannot be loaded, Step 2 falls back to the old TF-IDF
+word-counter and the result page says which one answered.
 """
 
 import json
@@ -61,21 +30,18 @@ import os
 import pickle
 
 from .text_cleaning import clean_article_text
-from .text_matching import normalize_headline
+from .text_matching import body_key, normalize_headline
 from .input_check import check_long_enough
 from .web_check import check_online, should_check
 
-# ============================================================================
-# LOAD THE ML MODEL (loaded ONCE when Django starts, kept in memory)
-# ============================================================================
+# --- The old TF-IDF word-counter: Step 2's fallback -------------------------
+# Loaded once at import and kept in memory.
 
-# Get the path to the model files inside the analyzer/ folder
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _model_path = os.path.join(_current_dir, 'model.pkl')
 _vectorizer_path = os.path.join(_current_dir, 'vectorizer.pkl')
 _meta_path = os.path.join(_current_dir, 'model_meta.json')
 
-# Load them into memory once
 try:
     with open(_model_path, 'rb') as f:
         _model = pickle.load(f)
@@ -88,8 +54,7 @@ except FileNotFoundError:
     _ml_ready = False
     print("WARNING: model.pkl or vectorizer.pkl not found. ML predictions disabled.")
 
-# The model's measured performance, recorded by train_mega_model.py.
-# If it is missing we quote no accuracy figure at all rather than guessing one.
+# Missing metadata means we quote no accuracy figure at all rather than guess one.
 try:
     with open(_meta_path, 'r', encoding='utf-8') as f:
         _model_meta = json.load(f)
@@ -97,30 +62,20 @@ except (FileNotFoundError, ValueError):
     _model_meta = None
     print("NOTE: model_meta.json not found. The app will not quote a model accuracy.")
 
-# Whether to strip publisher fingerprints out of the user's text before asking
-# for a prediction. This MUST match how the model was trained: feed cleaned text
-# to a model that learned from raw text (or the reverse) and its answers quietly
-# turn to noise. train_honest_model.py sets 'text_cleaned' in the metadata;
-# train_mega_model.py does not, so an older model is fed the raw text it expects.
+# Must match how the model was trained, or its answers quietly turn to noise.
+# train_honest_model.py sets 'text_cleaned'; train_mega_model.py does not.
 _clean_before_predict = bool(_model_meta and _model_meta.get('text_cleaned'))
 
 
 def _measured_performance():
     """
-    Return a sentence describing the model's recorded accuracy, or an empty
-    string if we have no recorded measurement. Never invents a number.
+    A sentence describing the word-counter's recorded accuracy, or '' if nothing
+    was measured. Never invents a number.
 
-    Which sentence depends on how the model was measured, because the two are
-    not comparable and must not be worded as if they were:
-
-      cross_source  train_honest_model.py held an entire collection of articles
-                    back — different outlets, never studied — and examined the
-                    model on that. This is the figure worth quoting.
-
-      anything else train_mega_model.py shuffled everything together and hid
-                    one article in five. Those hidden articles came from the
-                    same piles as the studied ones, so the figure flatters the
-                    model. Reported plainly, without the word "accuracy".
+    The wording depends on how it was measured, because the two are not comparable.
+    A cross_source figure held back a whole collection of unseen outlets and is the
+    one worth quoting; anything else shuffled everything together, so the held-back
+    articles came from the same piles and the figure flatters the model.
     """
     if not _model_meta:
         return ''
@@ -143,32 +98,24 @@ def _measured_performance():
     )
 
 
-# ============================================================================
-# THE READING MODEL (Step 2's first choice)
-# ============================================================================
+# --- The reading model: Step 2's first choice -------------------------------
 
 _reading_dir = os.path.join(_current_dir, 'reading_model')
 _reading_meta_path = os.path.join(_reading_dir, 'model_meta.json')
 _reading_cutoff_path = os.path.join(_reading_dir, 'cutoff.json')
 
-# None  = not attempted yet
-# False = attempted and unavailable, do not try again
-# dict  = loaded and ready
+# None = not attempted yet, False = unavailable so stop trying, dict = ready
 _reading_cache = None
 
 
 def _load_reading_model():
     """
-    Load the reading model on first use and keep it in memory afterwards.
+    Load the reading model on first use and keep it in memory afterwards. Lazy on
+    purpose: it is ~270MB and this module is imported by every management command,
+    so the cost falls on the first analysis instead of on migrations and tests.
 
-    Loaded lazily rather than at import time on purpose. The model is ~270MB and
-    takes a few seconds to wake up, and importing this module happens for every
-    management command — migrations, shell, the test suite. Paying that cost to
-    run a migration would be silly. The trade is that the first analysis after a
-    restart is slow; every one after it is not.
-
-    Returns the loaded state, or None if the model cannot be used. Never raises:
-    a missing model must degrade to the old word-counter, not break the site.
+    Returns the loaded state, or None if it cannot be used. Never raises: a missing
+    model must degrade to the word-counter, not break the site.
     """
     global _reading_cache
 
@@ -182,9 +129,8 @@ def _load_reading_model():
               "Step 2 will use the old word-counter.")
         return None
 
-    # How reliable each verdict is, measured by tune_cutoff.py. Without this we
-    # have no honest figure to show alongside a verdict, so we decline to use the
-    # model at all rather than quote its own worthless confidence.
+    # Without cutoff.json there is no honest figure to show beside a verdict, so
+    # decline the model rather than quote its own worthless confidence.
     try:
         with open(_reading_cutoff_path, encoding='utf-8') as f:
             cutoff_data = json.load(f)
@@ -226,9 +172,8 @@ def _load_reading_model():
         'torch': torch,
         'tokenizer': tokenizer,
         'model': model,
-        # Which output column means FAKE, read from the model rather than
-        # assumed. If it is ever retrained with the labels the other way round,
-        # this keeps working instead of silently inverting every answer.
+        # Read from the model, so a retrain with the labels the other way round
+        # keeps working instead of inverting every answer.
         'fake_column': model.config.label2id['FAKE'],
         'max_length': reading_meta.get('max_length', 256),
         'meta': reading_meta,
@@ -238,11 +183,7 @@ def _load_reading_model():
 
 
 def _fake_score(state, text):
-    """
-    How fake this text looks, from 0.0 to 1.0, according to the reading model.
-
-    no_grad() because we only want an answer — nothing here is learning.
-    """
+    """How fake this text looks, 0.0 to 1.0, according to the reading model."""
     torch = state['torch']
 
     encoded = state['tokenizer'](
@@ -250,61 +191,27 @@ def _fake_score(state, text):
         max_length=state['max_length'], return_tensors='pt',
     )
 
+    # no_grad because we only want an answer — nothing here is learning.
     with torch.no_grad():
         logits = state['model'](**encoded).logits
 
     return float(torch.softmax(logits, dim=1)[0, state['fake_column']])
 
 
-def _reading_model_evidence(state):
+# --- Step 1: finding a known article ----------------------------------------
+
+def _pick_best(candidates):
     """
-    One sentence on where the reliability figures came from, built from the
-    saved measurements rather than typed in here.
-    """
-    verdict = state['verdict']
-    meta = state['meta']
+    Choose between saved rows that share a lookup key. They can disagree — one
+    source calling a story REAL, another FAKE — and .first() would return whichever
+    row the database reached first, which is not a decision. Instead: fact-checked
+    rows before publisher-inferred ones, then oldest id so lookups stay stable.
 
-    return (
-        f" That figure comes from testing on {verdict['measured_on']:,} articles "
-        f"in a separate collection the model never learned from — the only test "
-        f"that describes text like yours, which by definition is not in our "
-        f"dataset (model trained {meta.get('trained_at', 'date unrecorded')})."
-    )
-
-
-# ============================================================================
-# STEP 1 HELPER: FINDING A KNOWN ARTICLE
-# ============================================================================
-
-def best_match(headline):
-    """
-    Find the best saved article for this headline, or None.
-
-    Both sides of the comparison go through normalize_headline(), so a curly
-    versus straight apostrophe, a missing semicolon, odd capitalisation or a
-    trailing full stop no longer cause a miss.
-
-    When several saved rows share the same tidied headline they can disagree —
-    one source calling it REAL while another calls it FAKE. Picking .first()
-    there returns whichever row the database happens to reach first, which is
-    not a decision. Instead we order explicitly:
-
-      1. fact-checked rows before publisher-inferred ones (BASIS_RANK)
-      2. then oldest row id, purely so repeat lookups stay stable
-
-    so the same input always produces the same verdict, and real fact-checking
-    always outranks a guess based on the publisher.
+    Sorted in Python because the ranking lives in BASIS_RANK and the candidate list
+    for one exact key is tiny.
     """
     from .models import KnownArticle
 
-    key = normalize_headline(headline)
-    if not key:
-        return None
-
-    candidates = KnownArticle.objects.filter(headline_key=key)
-
-    # Sort in Python rather than SQL: the ranking lives in BASIS_RANK on the
-    # model, and the candidate list for one exact key is tiny (usually 1 row).
     return min(
         candidates,
         key=lambda a: (KnownArticle.BASIS_RANK.get(a.label_basis, 99), a.id),
@@ -312,47 +219,86 @@ def best_match(headline):
     )
 
 
-# ============================================================================
-# MAIN ANALYSIS FUNCTION
-# ============================================================================
-
-def analyze_text(headline, article_text=""):
-    """
-    Analyze a news headline and optional article text for fake news.
-
-    Uses a two-step hybrid approach:
-      1. Database lookup for known articles (tidied headline match)
-      2. The reading model for unknown articles, which always returns a verdict
-
-    Parameters:
-        headline (str): The news headline
-        article_text (str): Optional article body text
-
-    Returns:
-        dict with: score, label, confidence, method, explanation
-
-        label is one of 'Likely Fake', 'Likely Real' or 'Unknown'.
-        confidence is how often that KIND of verdict has been measured correct —
-        NOT how sure the model is. See this module's docstring; the difference
-        is the point of the whole design.
-    """
-    # Import models here to avoid circular imports
+def best_match(headline):
+    """The best saved article for this headline, or None. Both sides go through
+    normalize_headline(), so a curly apostrophe or a trailing full stop no longer
+    causes a miss."""
     from .models import KnownArticle
 
-    # Count the corpus live, so the figure we report is always the real one
+    key = normalize_headline(headline)
+    if not key:
+        return None
+
+    return _pick_best(KnownArticle.objects.filter(headline_key=key))
+
+
+def best_match_by_body(article_text):
+    """
+    The second door into the corpus, for when a headline has been edited but the
+    body pasted underneath is still a perfect copy.
+
+    Still an EXACT match on tidied text, not a similarity score, which is what lets
+    the caller keep reporting 100% honestly. None when the body is too short to key.
+    """
+    from .models import KnownArticle
+
+    key = body_key(article_text)
+    if not key:
+        return None
+
+    return _pick_best(KnownArticle.objects.filter(body_key=key))
+
+
+def analyze_text(headline, article_text="", search_web=False):
+    """
+    Analyze a headline and optional article body.
+
+    search_web adds an online check on a confident score; the unsure band still
+    triggers one on its own when it is False. Ignored when Step 1 answers.
+
+    Returns score, label, confidence, method and explanation. label is 'Likely
+    Fake', 'Likely Real', 'Not Sure' or 'Unknown'. confidence is how often that KIND
+    of verdict is measured correct, NOT how sure the model is.
+    """
+    # Imported here to avoid a circular import.
+    from .models import KnownArticle
+
+    # Counted live, so the figure reported is always the real one.
     known_total = KnownArticle.objects.count()
 
-    # ------------------------------------------------------------------
-    # STEP 1: Database Fact-Check
-    # ------------------------------------------------------------------
+    # --- Step 1: database fact-check ---
+    # Headline first, then the body, because headlines get edited and bodies mostly
+    # do not. BOTH are exact matches, so the 100% below stays honest either way.
     match = best_match(headline)
+    matched_on = 'headline'
+
+    if not match:
+        # Two texts to try, because views.analyze() already guessed where the
+        # headline ends by splitting on the first newline. Paste a body alone and
+        # that guess strands the real opening words in `headline`, so try the body,
+        # then the whole paste back together. This widens WHERE we look, not how
+        # loosely we compare.
+        for candidate in (article_text, f"{headline}\n{article_text}"):
+            match = best_match_by_body(candidate)
+            if match:
+                matched_on = 'body'
+                break
 
     if match:
-        # We found this exact headline in the loaded corpus
         if match.label == 'FAKE':
             label = 'Likely Fake'
         else:
             label = 'Likely Real'
+
+        # Only on a body match, where the headline shown further down the page is
+        # not the one the reader pasted.
+        if matched_on == 'body':
+            note = (
+                " Matched on the article text — the headline you pasted is not "
+                "the one we have on file."
+            )
+        else:
+            note = ''
 
         return {
             'score': 100 if match.label == 'FAKE' else 0,
@@ -360,23 +306,19 @@ def analyze_text(headline, article_text=""):
             'confidence': 100.0,
             'method': 'database',
             'matched_article': match,
+            'matched_on': matched_on,
+            # The three things the rest of the page does not already say: dataset
+            # size, who labelled it and on what grounds, what the 100% measures.
             'explanation': (
-                f"This headline matched an article in our fact-check dataset "
-                f"({known_total:,} articles). {match.describe_basis()} "
-                f"The 100% figure reflects the certainty of that headline match, "
-                f"not an independent check of the article's claims."
+                f"Found in our dataset of {known_total:,} articles, "
+                f"{match.describe_basis()}.{note} "
+                f"The 100% is how certain the match is."
             ),
         }
 
-    # ------------------------------------------------------------------
-    # STEP 2: The reading model (headline not found in database)
-    # ------------------------------------------------------------------
-    # Before spending anything on it: is there enough text to read? The model
-    # has no way to say "that is not enough to go on" — asked about the single
-    # word "news" it answered 99.8% fake — and the result page would print a
-    # measured reliability figure next to that guess. Refusing is the honest
-    # answer, and it has to happen HERE rather than in the form, because a bare
-    # headline is a fine thing to paste when Step 1 can look it up.
+    # --- Step 2: the reading model ---
+    # Refusing short text happens HERE, not in the form, because a bare headline is
+    # a fine thing to paste when Step 1 can look it up.
     short = check_long_enough(f"{headline} {article_text}")
     if short:
         return {
@@ -387,22 +329,16 @@ def analyze_text(headline, article_text=""):
             'explanation': short.message,
         }
 
-    # Combine headline and article text — the model was trained on the two
-    # joined, so it must be asked the same way.
+    # Joined, because the model was trained on the two joined.
     full_text = f"{headline} {article_text}".strip()
 
     reading = _load_reading_model()
 
     if reading:
-        # Strip the publisher fingerprints — the newswire dateline, the agency
-        # name, image credits, links — so the model has to judge the writing
-        # rather than recognise where it was published. The reading model was
-        # trained on cleaned text (model_meta records text_cleaned), so this is
-        # not optional for it.
-        #
-        # If cleaning removes everything (the input was nothing but a link, say)
-        # keep the original, because a blank string tells the model nothing at
-        # all and it would still return a confident-looking percentage.
+        # Strip publisher fingerprints so the model judges the writing, not where
+        # it was published. Not optional: it was trained on cleaned text. Keep the
+        # original if cleaning removes everything, since a blank string tells the
+        # model nothing and would still come back with a confident percentage.
         cleaned = clean_article_text(full_text)
         model_input = cleaned if cleaned else full_text
 
@@ -410,101 +346,65 @@ def analyze_text(headline, article_text=""):
         verdict = reading['verdict']
         score = round(fake_score * 100)
 
-        # The cutoff is not 0.5. tune_cutoff.py measured that this model leans
-        # towards "real" on text it has not seen, so the line that maximises
-        # accuracy sits lower — see cutoff.json.
+        # Not 0.5: tune_cutoff.py measured this model leaning towards "real" on
+        # unseen text, so the line that maximises accuracy sits lower.
         says_fake = fake_score > verdict['score_above']
 
-        # 'confidence' carries how often THIS KIND of verdict turns out correct,
-        # never the model's own certainty. See this module's docstring for why
-        # that distinction is the whole point.
-        # Which verdict is the weaker one is WORKED OUT, not assumed. It used to
-        # be written in as a fact about "Likely Real", which was true of the
-        # model of 18 Aug and is false of this one: real verdicts now hold up
-        # better than fake ones. A claim about the model's own reliability has to
-        # come from the measurements, or it rots the moment you retrain.
-        weaker = ('real' if verdict['real_precision'] < verdict['fake_precision']
-                  else 'fake')
-
+        # How often THIS KIND of verdict turns out correct, never the model's own
+        # certainty.
         if says_fake:
             label = 'Likely Fake'
             reliability = verdict['fake_precision']
-            wrong_share = round(100 - reliability, 1)
-            caveat = (
-                f"{'This is the weaker of its two verdicts: ' if weaker == 'fake' else 'So '}"
-                f"roughly {wrong_share}% of the articles it calls fake are "
-                f"genuinely real news — treat this as a reason to check further, "
-                f"not a conclusion."
-            )
         else:
             label = 'Likely Real'
             reliability = verdict['real_precision']
-            wrong_share = round(100 - reliability, 1)
-            caveat = (
-                f"{'This is the weaker of its two verdicts: about ' if weaker == 'real' else 'About '}"
-                f"{wrong_share}% of the articles it calls real are actually fake, "
-                f"so this is not clearance to trust the story. Verify it yourself."
-            )
 
         result = {
             'score': score,
             'label': label,
             'confidence': reliability,
             'method': 'reading_model',
+            # Three facts, one sentence: not in the dataset, how often this verdict
+            # holds up, where that number came from.
             'explanation': (
-                f"This headline was not in our fact-check dataset "
-                f"({known_total:,} articles), so our reading model examined the "
-                f"writing itself and scored it {score}% on its fake scale. "
-                f"When it reaches this verdict it is correct {reliability}% of "
-                f"the time. {caveat}"
-                f"{_reading_model_evidence(reading)}"
+                f"Not in our dataset, so the reading model read the article "
+                f"itself. Verdicts like this are right {reliability}% of the "
+                f"time, measured on {verdict['measured_on']:,} articles it never "
+                f"saw in training."
             ),
         }
 
-        # ------------------------------------------------------------------
-        # STEP 3: ask the web, but ONLY where the model is unreliable
-        # ------------------------------------------------------------------
-        # should_check() consults the unsure band that tune_cutoff.py measured:
-        # for this model, scores between 0.01 and 0.99, about 15% of articles,
-        # where the verdict is right only 61% of the time against 93% outside.
-        # On the confident 85% a search would cost an API call to be told what
-        # the model already knew.
+        # --- Step 3: ask the web, where the model is unreliable or on request ---
+        # search_web WIDENS this gate and never narrows it: the unsure band still
+        # fires when the box is unticked. Deliberate, because nobody sees the raw
+        # score, so a switch that could turn the band off would quietly remove the
+        # search from the only 15% that needed it.
         #
-        # This is deliberately ADDITIVE. The verdict, the label and the
-        # reliability figure above are untouched by whatever comes back. Those
-        # numbers are measured on 3,160 articles with known answers; the web
-        # check is measured on nothing, and letting it quietly overwrite a
-        # measured verdict would throw away the one thing that makes this app
-        # honest. The template shows both and says so when they disagree.
-        #
-        # check_online() never raises. No key, no network, a timeout or an
-        # exhausted quota all come back as status 'unavailable', and the page
-        # still renders this verdict.
-        if should_check(fake_score):
-            result['web'] = check_online(headline, article_text)
+        # Additive too — the verdict and reliability above are untouched by whatever
+        # comes back. Those are measured; the web check is not. check_online() never
+        # raises; any failure comes back as status 'unavailable'.
+        model_unsure = should_check(fake_score)
+        if model_unsure or search_web:
+            web = check_online(headline, article_text)
+            # The page must not imply the model was unsure when it was not. Ticking
+            # the box on an article scoring 0.0002 has to read as "you asked".
+            web['reason'] = 'unsure' if model_unsure else 'requested'
+            result['web'] = web
 
         return result
 
-    # ------------------------------------------------------------------
-    # STEP 2 FALLBACK: the old word-counter, if the reading model is unusable
-    # ------------------------------------------------------------------
+    # --- Step 2 fallback: the old word-counter ---
     if _ml_ready:
-        # Only clean when this model was trained that way; see
-        # _clean_before_predict above.
+        # Only clean when this model was trained that way.
         if _clean_before_predict:
             cleaned = clean_article_text(full_text)
             if cleaned:
                 full_text = cleaned
 
-        # Convert text to TF-IDF vector (same format the model was trained on)
         text_vector = _vectorizer.transform([full_text])
+        prediction = _model.predict(text_vector)[0]   # 0 = REAL, 1 = FAKE
 
-        # Get prediction (0 = REAL, 1 = FAKE)
-        prediction = _model.predict(text_vector)[0]
-
-        # Get confidence percentage from predict_proba
         probabilities = _model.predict_proba(text_vector)[0]
-        # probabilities[0] = probability of REAL, probabilities[1] = probability of FAKE
         confidence = round(max(probabilities) * 100, 2)
 
         if prediction == 1:
@@ -522,16 +422,13 @@ def analyze_text(headline, article_text=""):
             'confidence': confidence,
             'method': 'ml_prediction',
             'explanation': (
-                f"This headline was not in our fact-check dataset ({known_total:,} articles), "
-                f"so our machine-learning model analyzed the text instead. It is "
-                f"{confidence}% confident the article is {verdict_word}."
-                f"{_measured_performance()}"
+                f"Not in our dataset, so the word-counting model read the "
+                f"article itself. It is {confidence}% sure this is "
+                f"{verdict_word}.{_measured_performance()}"
             ),
         }
 
-    # ------------------------------------------------------------------
-    # FALLBACK: Neither database nor ML available
-    # ------------------------------------------------------------------
+    # --- Nothing available at all ---
     return {
         'score': 0,
         'label': 'Unknown',
@@ -539,4 +436,3 @@ def analyze_text(headline, article_text=""):
         'method': 'unavailable',
         'explanation': 'Analysis system is not available. Please ensure the model files are present.',
     }
-

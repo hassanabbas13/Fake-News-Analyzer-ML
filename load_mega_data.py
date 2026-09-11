@@ -44,7 +44,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'fake_news_project.settings')
 django.setup()
 
 from analyzer.models import KnownArticle
-from analyzer.text_matching import normalize_headline
+from analyzer.text_matching import body_key, normalize_headline
 
 # How much of each article body to keep. Enough for the result page to show the
 # user what was matched, without storing 140MB of article text in SQLite.
@@ -205,11 +205,18 @@ def add_new_articles(df, existing, name, verbose=True):
         else:
             counts['added'] += 1
 
+        extract = build_extract(row.body)
+
         to_create.append(
             KnownArticle(
                 headline=row.headline.strip()[:1000],
                 headline_key=key[:1000],
-                article_text=build_extract(row.body),
+                article_text=extract,
+                # Keyed off the EXTRACT, not row.body, because the extract is
+                # what gets stored — so this matches what save() would have
+                # produced for the same row. Keying off the full body could
+                # disagree with it and produce a key nothing can ever hit.
+                body_key=body_key(extract)[:400],
                 label=row.label,
                 source=row.source,
                 label_basis=row.basis,
@@ -220,7 +227,10 @@ def add_new_articles(df, existing, name, verbose=True):
         existing[key] = new_rank
 
     if to_create:
-        # bulk_create skips save(), which is why headline_key is set by hand above
+        # bulk_create skips save(), which is why BOTH keys are set by hand above.
+        # Forget body_key here and a reload leaves 59,660 rows with an empty
+        # column — the body lookup would then find nothing, quietly, with no
+        # error to point at it.
         KnownArticle.objects.bulk_create(to_create, batch_size=BATCH_SIZE)
 
     total_new = counts['added'] + counts['better_evidence']

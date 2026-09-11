@@ -1,0 +1,17 @@
+{
+  "model_type": "distilbert",
+  "base_model": "distilbert-base-uncased",
+  "max_length": 256,
+  "test_accuracy": 88.77,
+  "real_recall": 0.872,
+  "fake_recall": 0.904,
+  "training_samples": 59618,
+  "test_samples": 6321,
+  "trained_at": "2026-08-19",
+  "evaluation": "cross_source",
+  "trained_on": "Kaggle ISOT (Fake.csv + True.csv) + diverse_fakes.csv + diverse_reals.csv",
+  "diverse_fakes_articles": 7257,
+  "diverse_reals_articles": 7472,
+  "tested_on": "McIntire (fake_or_real_news.csv)",
+  "text_cleaned": true
+}

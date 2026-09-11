@@ -1,0 +1,40 @@
+{
+  "cutoff": 0.4,
+  "chosen_for": "best accuracy on a held-out half of McIntire",
+  "accuracy": 88.45,
+  "real_recall": 0.864,
+  "fake_recall": 0.905,
+  "cutoff_chosen_on": 3160,
+  "measured_on": 3160,
+  "evaluation": "cross_source",
+  "alternative_even_cutoff": 0.7497418795783201,
+  "verdict": {
+    "score_above": 0.4,
+    "accuracy": 88.4,
+    "fake_precision": 86.9,
+    "fake_coverage": 51.9,
+    "real_precision": 90.1,
+    "real_coverage": 48.1,
+    "measured_on": 3160
+  },
+  "flag": {
+    "score_above": 0.00469314350878566,
+    "precision": 75.9,
+    "coverage": 63.4,
+    "below_band_real": 95.3,
+    "below_band_coverage": 36.6,
+    "measured_on": 3160
+  },
+  "flag_precision_floor": 0.75,
+  "unsure_band": {
+    "low": 0.01,
+    "high": 0.99,
+    "coverage": 14.8,
+    "accuracy_inside": 61.1,
+    "accuracy_outside": 93.2,
+    "searches_per_1000_articles": 148,
+    "measured_on": 3160
+  },
+  "unsure_max_coverage": 0.2,
+  "unsure_accuracy_floor": 75.0
+}

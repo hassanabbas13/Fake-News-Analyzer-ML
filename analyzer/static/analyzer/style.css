@@ -1,30 +1,17 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   style.css — Fake News Analyzer, neo-brutalist
-   ═══════════════════════════════════════════════════════════════════════════
+/* Fake News Analyzer — neo-brutalist. Self-contained; Bootstrap's stylesheet is
+   deliberately not loaded, only its icon font.
 
-   Palette and the neo-brutalist details (hard offset shadows, 2px black
-   borders, press-down buttons, drifting blurred shapes behind frosted glass)
-   are carried over from the Lumen RAG design. Mint × yellow × lavender × cream.
+   One rule holds the design together, and every colour choice below follows
+   from it: COLOUR CARRIES MEANING HERE, so it may not be used for decoration.
 
-   This file is self-contained. Bootstrap's stylesheet is deliberately NOT
-   loaded any more: it fought the hard shadows and flat borders at every turn.
-   Only Bootstrap ICONS remain, which is a font, not a layout system.
-
-   One rule holds the whole design together, and it is worth stating because
-   every colour choice below follows from it:
-
-       COLOUR CARRIES MEANING HERE, so it may not be used for decoration.
-
-       mint   = real            coral = fake
-       yellow = caution         lavender = came from the database
+       mint   = real        coral    = fake
+       yellow = caution     lavender = came from the database
        cream  = neutral chrome
 
-   A verdict page is not a place to be playful with hue. Someone reads the
-   colour before they read the words, so a mint panel around a "Likely Fake"
-   result would tell them the opposite of what the model said. Accents on
-   non-verdict pages stay in yellow and lavender for that reason: those two
-   never claim anything about an article's truth.
-   ═══════════════════════════════════════════════════════════════════════════ */
+   Someone reads the colour before they read the words, so a mint panel around a
+   "Likely Fake" result would tell them the opposite of what the model said.
+   Accents on non-verdict pages stay in yellow and lavender, which never claim
+   anything about an article's truth. */
 
 :root {
     /* ─── Palette ─── */
@@ -48,6 +35,7 @@
        this is a saturated member of the same family. */
     --coral: #FF6B6B;
     --coral-dark: #E85555;
+    --coral-pale: #FFE3E3;   /* delete buttons at rest — see .btn-danger */
 
     --cream: #F5F0E8;
     --cream-dark: #E8E0D4;
@@ -89,6 +77,10 @@ html { scroll-behavior: smooth; }
 
 body {
     min-height: 100vh;
+    /* Block formatting context, so .topbar's 16px top margin cannot collapse out
+       through body. Without it the document was 100vh + 16px and every page
+       scrolled by exactly that much with nothing to show for it. */
+    display: flow-root;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 15px;
     line-height: 1.6;
@@ -98,11 +90,9 @@ body {
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   BACKGROUND
-   Fixed behind everything, so it does not scroll with the page and does not
-   cost a repaint on every wheel tick.
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── BACKGROUND ───
+   Fixed behind everything, so it does not scroll and costs no repaint per
+   wheel tick. */
 
 .bg-layer {
     position: fixed;
@@ -147,9 +137,7 @@ body {
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   SHARED PIECES
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── SHARED PIECES ─── */
 
 .glass {
     background: var(--glass-bg);
@@ -187,13 +175,13 @@ a:hover { text-decoration-color: var(--neo-black); }
 .stack > * + * { margin-top: var(--space-lg); }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   TOP BAR
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── TOP BAR ─── */
 
+/* Deliberately not sticky: a hard border and offset shadow cut across headings
+   and card edges when this floated over scrolling content. z-index is still
+   needed to stay above .bg-layer. */
 .topbar {
-    position: sticky;
-    top: var(--space-md);
+    position: relative;
     z-index: 50;
     display: flex;
     align-items: center;
@@ -274,9 +262,7 @@ a:hover { text-decoration-color: var(--neo-black); }
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   BUTTONS
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── BUTTONS ─── */
 
 .btn {
     display: inline-flex;
@@ -308,6 +294,20 @@ a:hover { text-decoration-color: var(--neo-black); }
 .btn-ghost { background: rgba(255, 255, 255, 0.7); box-shadow: 3px 3px 0 var(--neo-black); }
 .btn-ghost:hover { background: white; }
 
+/* Destructive actions. Coral already reads as "stop and look", but stays pale
+   until hover so a table of these does not shout over the verdict badges. */
+.btn-danger {
+    background: var(--coral-pale);
+    color: var(--coral-dark);
+}
+.btn-danger:hover {
+    background: var(--coral);
+    color: var(--neo-black);
+}
+
+.btn-icon { padding: 5px 9px; }
+.btn-icon i { font-size: 13px; }
+
 .btn-lg { padding: 16px 30px; font-size: 16px; }
 .btn-sm {
     padding: 5px 13px;
@@ -329,9 +329,7 @@ a:hover { text-decoration-color: var(--neo-black); }
 .btn-row-center { justify-content: center; }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   CARDS
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── CARDS ─── */
 
 .card {
     position: relative;
@@ -345,8 +343,8 @@ a:hover { text-decoration-color: var(--neo-black); }
 }
 .card-lg { padding: var(--space-xl); }
 
-/* The 3px rule along the top of a card. Purely a colour-coded label for what
-   kind of information is inside — see the colour rule at the top of the file. */
+/* The 3px rule along the top of a card: a colour-coded label for what kind of
+   information is inside. See the colour rule at the top of the file. */
 .card-tab::before {
     content: '';
     position: absolute;
@@ -371,11 +369,29 @@ a:hover { text-decoration-color: var(--neo-black); }
 }
 .card-title i { font-size: 18px; }
 
+/* A quiet line under a card heading. Pulls up against the heading's own bottom
+   margin rather than adding a second gap. */
+.card-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: calc(var(--space-md) * -1 + 2px);
+    margin-bottom: var(--space-md);
+}
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   NOTICES
-   The flat, bordered relatives of Bootstrap's alerts.
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* Card heading with a control pushed to the far end. Cancels the heading's own
+   bottom margin and carries the gap itself, or the button sits optically low. */
+.card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+.card-head .card-title { margin-bottom: 0; }
+
+
+/* ─── NOTICES ─── the flat, bordered relatives of Bootstrap's alerts. */
 
 .notice {
     display: flex;
@@ -398,9 +414,8 @@ a:hover { text-decoration-color: var(--neo-black); }
 .notice-coral    { background: var(--peach-soft); }
 .notice-plain    { background: var(--cream-dark); }
 
-/* Reserved for the two disagreement warnings on the result page. When the model
-   and the web contradict each other that is the single most useful thing on the
-   page, so it gets the only shadow in a colour other than black. */
+/* The two disagreement warnings on the result page. Model contradicting the web
+   is the most useful thing there, so it gets the only non-black shadow. */
 .notice-loud {
     background: var(--yellow);
     box-shadow: 4px 4px 0 var(--coral);
@@ -408,9 +423,7 @@ a:hover { text-decoration-color: var(--neo-black); }
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   PILLS AND BADGES
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── PILLS AND BADGES ─── */
 
 .pill {
     display: inline-flex;
@@ -451,9 +464,7 @@ a:hover { text-decoration-color: var(--neo-black); }
 .dot-coral { background: var(--coral); }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   HOME
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── HOME ─── */
 
 .hero {
     text-align: center;
@@ -478,53 +489,7 @@ a:hover { text-decoration-color: var(--neo-black); }
     margin: 0 auto var(--space-xl);
 }
 
-/* The three numbered steps. Numbers are drawn rather than listed, because the
-   order they run in IS the explanation: the database answers first and best,
-   the model only sees what the database missed. */
-.steps {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-md);
-    margin-top: var(--space-xl);
-}
-.step {
-    padding: var(--space-lg) var(--space-md);
-    border-radius: var(--radius-md);
-    border: 2px solid var(--neo-black);
-    background: rgba(255, 255, 255, 0.75);
-    backdrop-filter: blur(12px);
-    text-align: left;
-    transition: all 0.2s var(--ease-spring);
-}
-.step:hover {
-    transform: translate(-3px, -3px);
-    box-shadow: 5px 5px 0 var(--neo-black);
-    background: white;
-}
-.step-num {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-    border: 2px solid var(--neo-black);
-    box-shadow: 2px 2px 0 var(--neo-black);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 15px;
-    font-weight: 700;
-    margin-bottom: var(--space-sm);
-}
-.step:nth-child(1) .step-num { background: var(--lavender-soft); }
-.step:nth-child(2) .step-num { background: var(--mint); }
-.step:nth-child(3) .step-num { background: var(--yellow); }
-.step h3 { font-size: 16px; margin-bottom: 5px; }
-.step p  { font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; }
-
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   THE INPUT BOX
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── THE INPUT BOX ─── */
 
 .field-label {
     display: flex;
@@ -549,8 +514,13 @@ a:hover { text-decoration-color: var(--neo-black); }
     font-size: 15px;
     line-height: 1.6;
     color: var(--text-primary);
-    resize: vertical;
+    /* No drag handle: it let the box be pulled out of line with its card, and
+       the script in analyze.html grows the box to fit anyway. That script also
+       owns overflow-y; the default is left alone here so a long paste is still
+       scrollable if the script never runs. */
+    resize: none;
     min-height: 190px;
+    max-height: 65vh;   /* past this it scrolls, so the buttons stay reachable */
     outline: none;
     box-shadow: 4px 4px 0 var(--neo-black);
     transition: box-shadow 0.2s var(--ease-out), transform 0.2s var(--ease-out), background 0.2s;
@@ -571,6 +541,51 @@ a:hover { text-decoration-color: var(--neo-black); }
     margin-top: var(--space-sm);
 }
 .field-help { font-size: 12.5px; color: var(--text-muted); }
+
+/* The "also check the web" opt-in. Lavender because it is a choice about where
+   we look, not a claim about the article: mint or coral would read as a verdict
+   before the reader has even submitted. */
+.field-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    margin-top: var(--space-md);
+    padding: 13px 15px;
+    border: 2.5px solid var(--neo-black);
+    border-radius: var(--radius-lg);
+    background: var(--lavender-soft);
+    box-shadow: 3px 3px 0 var(--neo-black);
+    cursor: pointer;
+    transition: box-shadow 0.2s var(--ease-out), transform 0.2s var(--ease-out);
+}
+.field-check:hover {
+    box-shadow: 5px 5px 0 var(--lavender-dark);
+    transform: translate(-1px, -1px);
+}
+/* accent-color styles the native control, which keeps the real focus ring and
+   keyboard behaviour that a hand-drawn replacement box would have to reinvent. */
+.field-check-box {
+    width: 19px;
+    height: 19px;
+    margin-top: 1px;
+    accent-color: var(--lavender-dark);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.field-check span {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.field-check strong {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13.5px;
+}
+.field-check small {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
 
 /* The live word counter. Its three states mirror the server's rules exactly —
    under MIN_WORDS, inside the range, over MAX_WORDS — so the browser never
@@ -606,9 +621,7 @@ a:hover { text-decoration-color: var(--neo-black); }
 .field-error li + li { margin-top: 5px; }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   THE VERDICT
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── THE VERDICT ─── */
 
 .verdict {
     text-align: center;
@@ -707,9 +720,7 @@ a:hover { text-decoration-color: var(--neo-black); }
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   DASHBOARD
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── DASHBOARD ─── */
 
 .stat-grid {
     display: grid;
@@ -775,6 +786,16 @@ tbody tr { transition: background 0.15s; }
 tbody tr:hover { background: rgba(255, 255, 255, 0.7); }
 .cell-headline { min-width: 220px; max-width: 340px; font-weight: 500; }
 
+/* View + Delete in the last column. Each delete is its own <form>, and a form is
+   a block element, so without this the button drops onto a second line and the
+   row grows taller than every other row in the table. */
+.row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.row-actions form { display: inline-flex; margin: 0; }
+
 .empty {
     text-align: center;
     padding: var(--space-xl) var(--space-md);
@@ -794,17 +815,12 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.7); }
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   FOOTER, SCROLLBAR, ENTRANCE
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── SCROLLBAR, ENTRANCE ─── */
 
-.foot {
-    position: relative;
-    z-index: 1;
-    text-align: center;
-    padding: var(--space-lg) var(--space-md) var(--space-xl);
-    font-size: 12.5px;
-    color: var(--text-muted);
+/* The page has no footer. Pages end on their last card, so give the body a
+   little breathing room underneath instead of letting content run to the edge. */
+main {
+    padding-bottom: var(--space-xl);
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -822,12 +838,9 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.7); }
 .d3 { animation-delay: 0.18s; }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   NARROW SCREENS
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* ─── NARROW SCREENS ─── */
 
 @media (max-width: 860px) {
-    .steps      { grid-template-columns: 1fr; }
     .stat-grid  { grid-template-columns: repeat(2, 1fr); }
     .chart-grid { grid-template-columns: 1fr; }
 }
@@ -840,7 +853,6 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.7); }
         justify-content: center;
         padding: var(--space-sm) var(--space-md);
         gap: var(--space-sm);
-        position: static;
     }
     .topnav { margin-left: 0; width: 100%; justify-content: center; }
     .nav-item { padding: 7px 12px; font-size: 13px; }

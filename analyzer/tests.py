@@ -14,14 +14,21 @@ can still run the suite.
 For a smoke test against the real loaded dataset, use test_logic.py.
 """
 
+import re
 import unittest
+from unittest import mock
 
 from django.test import TestCase
 from django.urls import reverse
 
-from .analysis_engine import analyze_text, best_match, _ml_ready
+from . import analysis_engine
+from . import views
+from .analysis_engine import (analyze_text, best_match, best_match_by_body,
+                              _ml_ready)
+from .forms import NewsInputForm
+from .input_check import MIN_WORDS
 from .models import KnownArticle, NewsAnalysis
-from .text_matching import normalize_headline
+from .text_matching import BODY_KEY_WORDS, body_key, normalize_headline
 
 
 # Applied to tests that need model.pkl / vectorizer.pkl to be present
@@ -35,6 +42,23 @@ KNOWN_REAL = "a known real headline"
 # The real headline that exposed the too-fussy matching: the apostrophe in
 # "Year's" is the curly kind (U+2019), not the one on a keyboard.
 CURLY = "Donald Trump Sends Out Embarrassing New Year’s Eve Message; This is Disturbing"
+
+# The case that made body matching necessary. During testing the user pasted a
+# headline AND its body, having trimmed the trailing "(VIDEO)" off the title.
+# The headline lookup missed, the model was asked instead, and 100% certain
+# became an 86.9% guess — while a perfect copy of the body sat in the database,
+# unexamined.
+VIDEO_HEADLINE = (
+    "Sheriff David Clarke Becomes An Internet Joke For Threatening "
+    "To Poke People In The Eye (VIDEO)"
+)
+VIDEO_BODY = (
+    "Milwaukee Sheriff David Clarke is a Fox News regular who has a habit of "
+    "saying outrageous things in order to stay relevant, and this week was no "
+    "different. During an appearance on the network he threatened to poke "
+    "people in the eye, which the internet immediately turned into a joke at "
+    "his expense."
+)
 
 
 class KnownArticleMixin:
@@ -146,16 +170,233 @@ class BestMatchTests(TestCase):
         self.assertEqual(len(picks), 1)
 
 
-class LabelBasisTests(TestCase):
+# ============================================================================
+# MATCHING ON THE ARTICLE INSTEAD OF THE HEADLINE
+# ============================================================================
 
-    def test_publisher_basis_admits_nobody_checked(self):
+class BodyKeyTests(TestCase):
+    """
+    The article's own lookup key: its opening words, tidied the same way a
+    headline is. See text_matching.body_key.
+    """
+
+    def test_key_is_the_opening_words_tidied(self):
+        self.assertEqual(
+            body_key("WASHINGTON (Reuters) - The head of a faction", words=4),
+            'washington reuters the head',
+        )
+
+    def test_too_short_to_key_gives_a_blank(self):
+        self.assertEqual(body_key('only four words here'), '')
+
+    def test_key_stops_at_the_configured_word_count(self):
+        self.assertEqual(len(body_key(VIDEO_BODY).split()), BODY_KEY_WORDS)
+
+    def test_a_longer_paste_gives_the_same_key_as_the_shorter_stored_copy(self):
+        """
+        The whole reason the key is built from the OPENING words. We store about
+        100 words of each article; a user pastes the entire thing. Both have to
+        arrive at the same key or the lookup is pointless.
+        """
+        pasted = VIDEO_BODY + ' ' + ('Further paragraphs continue here. ' * 40)
+
+        self.assertEqual(body_key(pasted), body_key(VIDEO_BODY))
+
+    def test_curly_quotes_and_punctuation_do_not_change_the_key(self):
+        messy = VIDEO_BODY.replace("'", '’').replace('-', '—').upper()
+
+        self.assertEqual(body_key(messy), body_key(VIDEO_BODY))
+
+
+class BodyMatchTests(TestCase):
+    """best_match_by_body — the second door into the corpus."""
+
+    def setUp(self):
+        self.article = KnownArticle.objects.create(
+            headline=VIDEO_HEADLINE, article_text=VIDEO_BODY,
+            label='FAKE', source='Kaggle ISOT',
+        )
+
+    def test_save_fills_in_the_body_key(self):
+        self.assertEqual(self.article.body_key, body_key(VIDEO_BODY))
+
+    def test_exact_body_matches(self):
+        self.assertEqual(best_match_by_body(VIDEO_BODY), self.article)
+
+    def test_a_paste_longer_than_we_store_still_matches(self):
+        longer = VIDEO_BODY + ' Clarke later doubled down in a second interview.'
+
+        self.assertEqual(best_match_by_body(longer), self.article)
+
+    def test_edits_after_the_opening_words_do_not_cost_the_match(self):
+        """Only the opening is keyed, so a trimmed final paragraph is harmless."""
+        opening = ' '.join(VIDEO_BODY.split()[:BODY_KEY_WORDS])
+
+        self.assertEqual(best_match_by_body(opening + ' something else entirely'), self.article)
+
+    def test_a_different_opening_does_not_match(self):
+        self.assertIsNone(best_match_by_body('Something else entirely happened today. ' * 10))
+
+    def test_a_body_too_short_to_key_matches_nothing(self):
+        """
+        A blank key must never be matchable. If it were, every article too short
+        to key on would collide with every other one — and report 100%.
+        """
+        short = 'Too short to key on'
+        KnownArticle.objects.create(
+            headline='a short entry', article_text=short, label='FAKE', source='Junk',
+        )
+
+        self.assertIsNone(best_match_by_body(short))
+        self.assertIsNone(best_match_by_body(''))
+        self.assertIsNone(best_match_by_body(None))
+
+    def test_a_row_with_no_stored_body_is_not_reachable_this_way(self):
+        KnownArticle.objects.create(headline='bodyless row', label='REAL', source='Junk')
+
+        self.assertIsNone(best_match_by_body('bodyless row'))
+
+    def test_fact_checked_row_beats_publisher_guess(self):
+        """Same ranking as the headline door — evidence quality decides, not luck."""
+        KnownArticle.objects.create(
+            headline='A different headline for the same story', article_text=VIDEO_BODY,
+            label='REAL', source='PolitiFact', label_basis=KnownArticle.BASIS_FACT_CHECK,
+        )
+
+        winner = best_match_by_body(VIDEO_BODY)
+
+        self.assertEqual(winner.source, 'PolitiFact')
+
+    def test_changing_the_stored_body_moves_the_key_with_it(self):
+        """
+        Regression guard on save(). A key left pointing at text the row no longer
+        holds is worse than no key: it matches the wrong article.
+        """
+        replacement = 'A completely different story about the city council budget ' * 4
+        self.article.article_text = replacement
+        self.article.save()
+
+        self.assertIsNone(best_match_by_body(VIDEO_BODY))
+        self.assertEqual(best_match_by_body(replacement), self.article)
+
+
+class BodyMatchInAnalysisTests(TestCase):
+    """
+    The reported bug, end to end: take one word out of a headline and the app
+    stopped consulting the database — even with a perfect copy of the article
+    pasted underneath it.
+    """
+
+    def setUp(self):
+        self.article = KnownArticle.objects.create(
+            headline=VIDEO_HEADLINE, article_text=VIDEO_BODY,
+            label='FAKE', source='Kaggle ISOT',
+        )
+        self.trimmed = VIDEO_HEADLINE.replace(' (VIDEO)', '')
+
+    def test_exact_headline_and_body_answers_from_the_database(self):
+        result = analyze_text(VIDEO_HEADLINE, VIDEO_BODY)
+
+        self.assertEqual(result['method'], 'database')
+        self.assertEqual(result['matched_on'], 'headline')
+
+    def test_headline_missing_a_word_still_answers_from_the_database(self):
+        """This is the exact case that used to fall through to the model."""
+        result = analyze_text(self.trimmed, VIDEO_BODY)
+
+        self.assertEqual(result['method'], 'database')
+        self.assertEqual(result['label'], 'Likely Fake')
+        self.assertEqual(result['confidence'], 100.0)
+        self.assertEqual(result['score'], 100)
+
+    def test_a_body_match_admits_the_headline_did_not_match(self):
+        """
+        The user's headline is not ours, and saying so matters: they may be
+        looking at a differently titled copy of the story.
+        """
+        result = analyze_text(self.trimmed, VIDEO_BODY)
+
+        self.assertEqual(result['matched_on'], 'body')
+        self.assertIn('not the one we have on file', result['explanation'])
+
+    def test_a_headline_match_does_not_claim_the_headline_differed(self):
+        result = analyze_text(VIDEO_HEADLINE, VIDEO_BODY)
+
+        self.assertNotIn('not the one we have on file', result['explanation'])
+
+    def test_a_body_match_still_offers_the_row_as_evidence(self):
+        """
+        Doubly important on this path: the headline shown on the result page is
+        ours, not the one the user pasted, so they need to see it.
+        """
+        result = analyze_text(self.trimmed, VIDEO_BODY)
+
+        self.assertEqual(result['matched_article'], self.article)
+
+    def test_the_headline_decides_when_both_doors_could_answer(self):
+        """
+        A deliberately typed headline is better evidence of what the user means
+        than the first twenty words of what they pasted below it.
+        """
+        other = KnownArticle.objects.create(
+            headline='An unrelated headline about the same body text',
+            article_text=VIDEO_BODY, label='REAL', source='Kaggle ISOT',
+        )
+
+        result = analyze_text(other.headline, VIDEO_BODY)
+
+        self.assertEqual(result['matched_article'], other)
+        self.assertEqual(result['label'], 'Likely Real')
+
+    def test_a_body_pasted_on_its_own_over_several_lines_matches(self):
+        """
+        views.analyze() hands the first line over as the headline. Paste a body
+        with no title and line one is its opening paragraph — so the words the
+        key needs end up in `headline`, not in `article_text`.
+        """
+        first, _, rest = VIDEO_BODY.partition('. ')
+
+        result = analyze_text(first + '.', rest)
+
+        self.assertEqual(result['method'], 'database')
+        self.assertEqual(result['matched_on'], 'body')
+
+    def test_a_body_pasted_on_its_own_as_one_block_matches(self):
+        """No newline anywhere, so the entire article arrives as the headline."""
+        result = analyze_text(VIDEO_BODY, '')
+
+        self.assertEqual(result['method'], 'database')
+
+    def test_a_genuinely_unknown_article_does_not_come_back_as_a_match(self):
+        """
+        The point of two exact keys is reach, not looseness. Something we do not
+        hold must still miss both doors.
+        """
+        result = analyze_text(
+            'A headline nobody has ever indexed anywhere',
+            'The city council voted on Tuesday to approve the revised budget for '
+            'the coming financial year after four hours of public comment, with '
+            'two members abstaining and one absent for medical reasons.',
+        )
+
+        self.assertNotEqual(result['method'], 'database')
+
+
+class LabelBasisTests(TestCase):
+    """
+    The two grounds must stay tellable apart. They are now separated by one
+    verb rather than a sentence each — 'labelled' for a publisher's say-so,
+    'fact-checked' for an investigated claim — so these assert on the verb.
+    """
+
+    def test_publisher_basis_does_not_claim_it_was_checked(self):
         article = KnownArticle.objects.create(
             headline='x', label='REAL', source='Kaggle ISOT',
         )
 
         self.assertFalse(article.is_fact_checked)
-        self.assertIn('where it was published', article.describe_basis())
-        self.assertIn('nobody checked', article.describe_basis())
+        self.assertIn('labelled REAL by Kaggle ISOT', article.describe_basis())
+        self.assertNotIn('fact-checked', article.describe_basis())
 
     def test_fact_check_basis_says_who_checked_it(self):
         article = KnownArticle.objects.create(
@@ -164,7 +405,7 @@ class LabelBasisTests(TestCase):
         )
 
         self.assertTrue(article.is_fact_checked)
-        self.assertIn('PolitiFact fact-checked this claim', article.describe_basis())
+        self.assertIn('fact-checked FAKE by PolitiFact', article.describe_basis())
 
     def test_headline_key_is_filled_in_automatically(self):
         """No caller should be able to create a row that lookups cannot find."""
@@ -344,6 +585,26 @@ class AnalyzeViewTests(KnownArticleMixin, TestCase):
         self.assertEqual(analysis.headline, KNOWN_REAL)
         self.assertEqual(analysis.article_text, '')
 
+    def test_post_of_a_body_with_no_headline_matches_the_database(self):
+        """
+        End to end through the form, because this is where the split happens: the
+        paste has no title, so its opening paragraph becomes the "headline" and
+        the body key has to be found anyway.
+        """
+        KnownArticle.objects.create(
+            headline=VIDEO_HEADLINE, article_text=VIDEO_BODY,
+            label='FAKE', source='Kaggle ISOT',
+        )
+        first, _, rest = VIDEO_BODY.partition('. ')
+
+        self.client.post(reverse('analyze'), {'news_content': f'{first}.\n{rest}'})
+
+        analysis = NewsAnalysis.objects.get()
+        self.assertEqual(analysis.method, 'database')
+        self.assertEqual(analysis.result_label, 'Likely Fake')
+        # Our headline, not the paragraph they pasted — that is the evidence
+        self.assertEqual(analysis.matched_headline, VIDEO_HEADLINE)
+
     def test_long_single_line_paste_is_not_lost(self):
         """Headline column caps at 500 chars — the full text must survive."""
         # Real English, because the form now rejects text that is not. The old
@@ -397,6 +658,158 @@ class ResultViewTests(KnownArticleMixin, TestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class HowWasThisDeterminedTests(TestCase):
+    """
+    The "How was this determined?" card must never render as a bare heading.
+
+    It did exactly that for method='too_short': the template had branches for
+    database, reading_model and ml_prediction, and nothing else, so a refusal
+    produced a card asking the question with no answer under it. Nothing crashed
+    and no test failed — the page just quietly stopped explaining itself.
+    """
+
+    # Every value analyze_text() can put in 'method'. Keep this in step with the
+    # engine; the last test in this class fails if it drifts.
+    ALL_METHODS = ['database', 'too_short', 'reading_model', 'ml_prediction', 'unavailable']
+
+    # Roughly the length the engine really produces, so the word count below is
+    # measuring the template rather than the shortness of a fixture.
+    EXPLANATION = ('Analysis system is not available. Please ensure the model '
+                   'files are present before trying again.')
+
+    def _card(self, method):
+        """The How-was-this-determined card, as rendered for one method."""
+        analysis = NewsAnalysis.objects.create(
+            headline='Some headline', score=50, result_label='Not Sure',
+            explanation=self.EXPLANATION, method=method,
+        )
+        body = self.client.get(reverse('result', args=[analysis.id])).content.decode()
+
+        start = body.index('How was this determined?')
+        return body[start:body.index('</section>', start)]
+
+    def _sentence(self, method):
+        """
+        The same card with its line breaks collapsed, for asserting on wording.
+
+        Whitespace is not significant in HTML, so a template author reflowing a
+        paragraph must not break a test. Asserting on the raw markup did exactly
+        that: "at least {{ min_words }} words" had a newline inside it.
+        """
+        return ' '.join(self._card(method).split())
+
+    def test_every_method_explains_itself(self):
+        for method in self.ALL_METHODS:
+            with self.subTest(method=method):
+                card = self._card(method)
+                # Strip the tags and see whether any words are left under the heading
+                text = re.sub(r'<[^>]+>', ' ', card.split('How was this determined?')[1])
+                self.assertGreater(
+                    len(text.split()), 8,
+                    f"method={method!r} renders an empty card",
+                )
+
+    def test_a_refusal_says_the_model_was_never_run(self):
+        """
+        The point of the wording. "Not Sure" reads like the model looked and
+        could not decide — it never looked at all.
+        """
+        card = self._sentence('too_short')
+
+        self.assertIn('Not enough text', card)
+        self.assertIn('nothing was checked', card.lower())
+
+    def test_a_refusal_says_how_much_text_to_paste(self):
+        """
+        The only sentence on this card the reader can act on. It went missing
+        once already, when the card was three sentences of why we refused and
+        none of what to do about it.
+        """
+        self.assertIn(f'at least {MIN_WORDS} words', self._sentence('too_short'))
+
+    def test_the_refusal_card_quotes_the_real_limit(self):
+        """
+        Guards against the number being typed into the template. Raise the limit
+        and the page must follow, or it tells people to paste an amount that
+        will be refused again.
+        """
+        with mock.patch.object(views, 'MIN_WORDS', 40):
+            self.assertIn('at least 40 words', self._sentence('too_short'))
+
+    def test_a_refusal_does_not_claim_a_model_read_it(self):
+        card = self._card('too_short')
+
+        self.assertNotIn('Judged on roughly the first 200 words', card)
+
+    def test_an_unrecognised_method_falls_back_to_the_explanation(self):
+        """A method nobody has written wording for must still say something."""
+        card = self._card('some_future_step')
+
+        self.assertIn('Analysis system is not available', card)
+
+    def test_the_method_list_here_matches_the_engine(self):
+        """
+        Guards the list above. A new method added to the engine without wording
+        here would otherwise slip through every test in this class.
+        """
+        import re as _re
+        from pathlib import Path
+
+        source = (Path(__file__).parent / 'analysis_engine.py').read_text(encoding='utf-8')
+        found = set(_re.findall(r"'method':\s*'(\w+)'", source))
+
+        self.assertEqual(found, set(self.ALL_METHODS))
+
+
+# ============================================================================
+# THE PAGE MUST NOT RANK THE MODEL'S TWO ANSWERS IN PROSE
+# ============================================================================
+
+class ReadingModelCardTests(TestCase):
+    """
+    The card used to name which verdict was the more reliable one. That claim was
+    hardcoded once, went stale at the next retrain, and told users in bold to
+    trust the WEAKER answer more: it called "Likely Fake" stronger while
+    cutoff.json said fake 86.9% against real 90.1%.
+
+    It was then computed from the measurements, which was correct but not worth
+    the two branches — the reader cannot act on knowing which answer is weaker.
+    So the card now says the same thing for both verdicts, and these tests keep
+    the ranking from creeping back in.
+    """
+
+    def _card(self, label):
+        analysis = NewsAnalysis.objects.create(
+            headline='Some headline', score=50, result_label=label,
+            explanation='x', method='reading_model', confidence=86.9)
+        page = self.client.get(reverse('result', args=[analysis.id]))
+        return ' '.join(page.content.decode().split())
+
+    def test_the_card_says_why_there_is_a_prediction_at_all(self):
+        for label in ('Likely Fake', 'Likely Real'):
+            card = self._card(label)
+            self.assertIn('not found in our dataset', card, label)
+            self.assertIn('language and writing patterns', card, label)
+
+    def test_neither_verdict_is_ranked_against_the_other(self):
+        """The regression that started this. No retrain can make prose stale."""
+        for label in ('Likely Fake', 'Likely Real'):
+            card = self._card(label)
+            for claim in ('weaker verdict', 'stronger verdict',
+                          'less reliable', 'more reliable of its'):
+                self.assertNotIn(claim, card, f'{label}: {claim}')
+
+    def test_likely_real_is_not_presented_as_clearance(self):
+        """
+        "Likely Real" reads as a clean bill of health. The model never checked
+        whether anything in the article happened, so it is not one.
+        """
+        self.assertIn('not as clearance', self._card('Likely Real'))
+
+    def test_likely_fake_does_not_carry_the_clearance_line(self):
+        self.assertNotIn('not as clearance', self._card('Likely Fake'))
+
+
 # ============================================================================
 # SHOWING THE READER THE ARTICLE WE MATCHED
 # ============================================================================
@@ -438,8 +851,7 @@ class MatchedArticleEvidenceTests(TestCase):
     def test_explanation_says_why_the_label_is_believed(self):
         analysis = self._analyse('a known fake headline')
 
-        self.assertIn('where it was published', analysis.explanation)
-        self.assertIn('nobody checked', analysis.explanation)
+        self.assertIn('labelled FAKE by Kaggle ISOT', analysis.explanation)
 
     def test_nothing_is_shown_when_no_article_matched(self):
         analysis = self._analyse('an utterly unseen headline about nothing at all')
@@ -641,6 +1053,38 @@ class LoaderTopUpTests(TestCase):
         self.assertEqual(saved.headline_key, 'new one')
         self.assertEqual(best_match('NEW ONE!'), saved)
 
+    def test_bulk_inserted_rows_still_get_a_body_key(self):
+        """
+        Same trap, second key. Miss this and a reload leaves every row with an
+        empty body_key: the body lookup finds nothing, silently, with no error
+        anywhere to point at the cause.
+        """
+        self._load([('New One', VIDEO_BODY, 'REAL', 'BBC', SOURCE)])
+
+        saved = KnownArticle.objects.get(source='BBC')
+        self.assertEqual(saved.body_key, body_key(VIDEO_BODY))
+        self.assertEqual(best_match_by_body(VIDEO_BODY), saved)
+
+    def test_the_body_key_is_built_from_the_extract_we_actually_store(self):
+        """
+        The key has to describe the stored text, not the full body it was cut
+        from — otherwise the loader and save() would disagree about the same row.
+        """
+        from load_mega_data import EXTRACT_CHARS
+
+        long_body = VIDEO_BODY + ' ' + ('Further reporting followed. ' * 60)
+        self.assertGreater(len(long_body), EXTRACT_CHARS)
+
+        self._load([('New One', long_body, 'REAL', 'BBC', SOURCE)])
+
+        saved = KnownArticle.objects.get(source='BBC')
+        self.assertEqual(saved.body_key, body_key(saved.article_text))
+        # Re-saving must not move it, which is what proves the two agree
+        saved.save()
+        self.assertEqual(
+            KnownArticle.objects.get(source='BBC').body_key, body_key(VIDEO_BODY)
+        )
+
 
 # ============================================================================
 # THE WEB CHECK — WHEN IT RUNS, AND WHAT THE PAGE SAYS
@@ -676,6 +1120,25 @@ FOUND_NOTHING = dict(FOUND_REAL, status='nothing', verdict='UNCLEAR',
 UNAVAILABLE = dict(FOUND_REAL, status='unavailable', verdict=None,
                    reporting=[], debunking=[], sources=[], summary='',
                    error='daily free search allowance used up')
+
+# Wire-service prose the reading model scores near 0, well outside the unsure
+# band, and long enough to clear MIN_WORDS. The checkbox tests need an article
+# the band would NEVER search on its own, so that a search happening at all
+# proves the box did it. Written from scratch, so no KnownArticle can match it.
+REAL_WIRE = (
+    "Central bank holds interest rates steady at four percent",
+    "The central bank left its benchmark interest rate unchanged at 4 percent "
+    "on Thursday, citing easing inflation and a cooling labour market. In a "
+    "statement following the two-day meeting, policymakers said they would "
+    "continue to assess incoming data before adjusting policy further. Eight of "
+    "the nine committee members voted to hold, with one favouring a "
+    "quarter-point cut. The decision was in line with expectations from "
+    "economists surveyed last week.",
+)
+
+# The same article as one textarea paste: headline on the first line, body under
+# it, which is how analyze() splits what it receives.
+WIRE_PASTE = '\n'.join(REAL_WIRE)
 
 
 class ShouldCheckTests(TestCase):
@@ -819,6 +1282,172 @@ class WebCheckDisplayTests(TestCase):
     def test_no_section_at_all_when_the_search_never_ran(self):
         response = self._page('Likely Fake', None)
         self.assertNotContains(response, 'What We Found Online')
+
+    def test_a_requested_search_does_not_claim_the_model_was_unsure(self):
+        """
+        Ticking the box on a confident article puts this card under a confident
+        verdict. If it said "the model was unsure" it would contradict the
+        percentage sitting directly above it.
+        """
+        response = self._page('Likely Fake', dict(FOUND_FAKE, reason='requested'))
+        self.assertContains(response, 'You asked us to check')
+        self.assertNotContains(response, 'The model was unsure')
+
+    def test_an_automatic_search_says_the_model_was_unsure(self):
+        response = self._page('Likely Fake', dict(FOUND_FAKE, reason='unsure'))
+        self.assertContains(response, 'The model was unsure')
+        self.assertNotContains(response, 'You asked us to check')
+
+    def test_a_row_saved_before_reasons_existed_claims_neither(self):
+        """Older analyses have no reason stored. Silence beats a guess."""
+        response = self._page('Likely Fake', FOUND_FAKE)
+        self.assertNotContains(response, 'You asked us to check')
+        self.assertNotContains(response, 'The model was unsure')
+
+
+class SearchWebCheckboxTests(KnownArticleMixin, TestCase):
+    """
+    The opt-in only ever ADDS searches.
+
+    Every test here stubs check_online, so nothing reaches the network and no
+    API allowance is spent. What is being tested is the gate, not the search.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.calls = []
+
+        def fake_search(headline, article_text='', **kwargs):
+            self.calls.append(headline)
+            return dict(FOUND_REAL)
+
+        self._real_search = analysis_engine.check_online
+        analysis_engine.check_online = fake_search
+
+        # A key must appear to exist or the form deletes the field and
+        # should_check() refuses outright, which would hide real failures here.
+        from . import web_check
+        self.web_check = web_check
+        self._read_key = web_check._read_key
+        web_check._read_key = lambda: 'test-key'
+        self._band = web_check.unsure_band
+        web_check.unsure_band = lambda: (0.01, 0.99)
+
+    def tearDown(self):
+        analysis_engine.check_online = self._real_search
+        self.web_check._read_key = self._read_key
+        self.web_check.unsure_band = self._band
+        super().tearDown()
+
+    # ── the engine gate ──
+
+    def test_ticking_the_box_searches_a_confident_article(self):
+        state = analysis_engine._load_reading_model()
+        if not state:
+            self.skipTest('reading model not present')
+
+        head, body = REAL_WIRE
+        score = analysis_engine._fake_score(state, f'{head}\n{body}')
+        self.assertFalse(self.web_check.should_check(score),
+                         'fixture is meant to be outside the unsure band')
+
+        analysis_engine.analyze_text(head, body, search_web=False)
+        self.assertEqual(self.calls, [], 'unticked must not spend a call')
+
+        result = analysis_engine.analyze_text(head, body, search_web=True)
+        self.assertEqual(self.calls, [head])
+        self.assertEqual(result['web']['reason'], 'requested')
+
+    def test_the_band_still_searches_on_its_own_when_unticked(self):
+        """
+        The reason this is an 'or' and not a switch. Nobody sees the raw score,
+        so nobody can tell which articles need the box.
+        """
+        analysis_engine.analyze_text('Unsure probe', 'body ' * 40,
+                                     search_web=False)
+        before = list(self.calls)
+
+        # Force every score into the band, whatever the model says.
+        self.web_check.unsure_band = lambda: (-1.0, 2.0)
+        result = analysis_engine.analyze_text('Unsure probe', 'body ' * 40,
+                                             search_web=False)
+
+        if result.get('method') != 'reading_model':
+            self.skipTest('reading model not present')
+        self.assertEqual(len(self.calls), len(before) + 1)
+        self.assertEqual(result['web']['reason'], 'unsure')
+
+    def test_a_database_hit_ignores_the_box_entirely(self):
+        result = analysis_engine.analyze_text(KNOWN_FAKE, '', search_web=True)
+
+        self.assertEqual(result['method'], 'database')
+        self.assertIsNone(result.get('web'))
+        self.assertEqual(self.calls, [], 'a known article costs no API call')
+
+    # ── the form and the view ──
+
+    def test_the_checkbox_is_offered_when_a_key_exists(self):
+        response = self.client.get(reverse('analyze'))
+        self.assertContains(response, 'search-web')
+        self.assertContains(response, 'Also check the web')
+
+    def test_the_checkbox_is_absent_without_a_key(self):
+        """A box that could only ever fail should not be on the page."""
+        self.web_check._read_key = lambda: None
+        response = self.client.get(reverse('analyze'))
+        self.assertNotContains(response, 'search-web')
+
+    def test_an_unticked_form_reports_no_request(self):
+        form = NewsInputForm({'news_content': WIRE_PASTE})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertFalse(form.wants_web_search())
+
+    def test_a_ticked_form_reports_a_request(self):
+        form = NewsInputForm({'news_content': WIRE_PASTE,
+                              'search_web': 'on'})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertTrue(form.wants_web_search())
+
+    def test_wants_web_search_is_false_when_the_field_was_dropped(self):
+        """A stale POST carrying search_web with no key must not sneak a call."""
+        self.web_check._read_key = lambda: None
+        form = NewsInputForm({'news_content': WIRE_PASTE,
+                              'search_web': 'on'})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertFalse(form.wants_web_search())
+
+    def test_the_view_passes_the_box_through_to_the_engine(self):
+        seen = {}
+        real = views.analyze_text
+
+        def spy(headline, article_text='', **kwargs):
+            seen.update(kwargs)
+            return real(headline, article_text, **kwargs)
+
+        views.analyze_text = spy
+        try:
+            self.client.post(reverse('analyze'),
+                             {'news_content': KNOWN_REAL, 'search_web': 'on'})
+        finally:
+            views.analyze_text = real
+
+        self.assertIs(seen.get('search_web'), True)
+
+    def test_a_requested_search_is_saved_on_the_analysis(self):
+        state = analysis_engine._load_reading_model()
+        if not state:
+            self.skipTest('reading model not present')
+
+        head, body = REAL_WIRE
+        self.client.post(reverse('analyze'),
+                         {'news_content': f'{head}\n{body}', 'search_web': 'on'})
+
+        analysis = NewsAnalysis.objects.latest('id')
+        self.assertEqual(analysis.method, 'reading_model')
+        self.assertEqual(analysis.web_check['reason'], 'requested')
+
+        page = self.client.get(reverse('result', args=[analysis.id]))
+        self.assertContains(page, 'You asked us to check')
 
 
 # ============================================================================
@@ -1025,3 +1654,154 @@ class TemplateRenderTests(KnownArticleMixin, TestCase):
         row = NewsAnalysis.objects.latest('id')
 
         self._assert_clean(self.client.get(reverse('result', args=[row.id])))
+
+
+# ============================================================================
+# DELETING SAVED ANALYSES
+# ============================================================================
+
+class DeleteAnalysisTests(KnownArticleMixin, TestCase):
+    """
+    The delete buttons on the dashboard.
+
+    Most of these assert what must NOT happen. A delete feature is only as good
+    as the things it refuses to do, and the expensive mistake here is not a
+    button that fails to delete — it is one that deletes on a GET, or reaches
+    past the history table into the fact-check corpus.
+    """
+
+    def _make_analysis(self):
+        self.client.post(reverse('analyze'), {'news_content': KNOWN_FAKE})
+        return NewsAnalysis.objects.latest('id')
+
+    def test_post_deletes_the_row(self):
+        row = self._make_analysis()
+
+        self.client.post(reverse('delete_analysis', args=[row.id]))
+
+        self.assertFalse(NewsAnalysis.objects.filter(id=row.id).exists())
+
+    def test_get_does_not_delete(self):
+        """
+        A delete reachable by GET is one a browser prefetch or a crawler can
+        fire with nobody clicking anything, and this app has no login to fall
+        back on. require_POST must answer 405 and leave the row alone.
+        """
+        row = self._make_analysis()
+
+        response = self.client.get(reverse('delete_analysis', args=[row.id]))
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(NewsAnalysis.objects.filter(id=row.id).exists())
+
+    def test_deleting_a_missing_row_is_404_not_silent_success(self):
+        """A stale tab should be told the row is gone, not redirected as if it worked."""
+        response = self.client.post(reverse('delete_analysis', args=[99999]))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_leaves_other_rows_alone(self):
+        keep = self._make_analysis()
+        drop = self._make_analysis()
+
+        self.client.post(reverse('delete_analysis', args=[drop.id]))
+
+        self.assertTrue(NewsAnalysis.objects.filter(id=keep.id).exists())
+
+    def test_clear_all_with_confirmation_empties_the_table(self):
+        self._make_analysis()
+        self._make_analysis()
+
+        self.client.post(reverse('clear_analyses'), {'confirm': 'DELETE'})
+
+        self.assertEqual(NewsAnalysis.objects.count(), 0)
+
+    def test_clear_all_without_confirmation_does_nothing(self):
+        """
+        The typed confirmation is checked server-side. A JavaScript confirm()
+        dialog is skipped by anything that is not a browser, so a replayed or
+        hand-made POST must not be enough to empty the table.
+        """
+        self._make_analysis()
+
+        self.client.post(reverse('clear_analyses'))
+
+        self.assertEqual(NewsAnalysis.objects.count(), 1)
+
+    def test_clear_all_by_get_does_nothing(self):
+        self._make_analysis()
+
+        response = self.client.get(reverse('clear_analyses'))
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(NewsAnalysis.objects.count(), 1)
+
+    def test_clearing_history_does_not_touch_the_fact_check_corpus(self):
+        """
+        The corpus is what the app KNOWS; history is what it was asked. Wiping
+        the corpus from a public button would silently turn every future
+        database match into a model guess, with nothing on screen saying so.
+        """
+        self._make_analysis()
+        before = KnownArticle.objects.count()
+
+        self.client.post(reverse('clear_analyses'), {'confirm': 'DELETE'})
+
+        self.assertEqual(KnownArticle.objects.count(), before)
+
+    def test_dashboard_offers_delete_controls_when_rows_exist(self):
+        row = self._make_analysis()
+
+        html = self.client.get(reverse('dashboard')).content.decode()
+
+        self.assertIn(reverse('delete_analysis', args=[row.id]), html)
+        self.assertIn(reverse('clear_analyses'), html)
+        # POST forms carry a CSRF token; a bare link would not.
+        self.assertIn('csrfmiddlewaretoken', html)
+
+    def test_empty_dashboard_offers_nothing_to_delete(self):
+        html = self.client.get(reverse('dashboard')).content.decode()
+
+        self.assertNotIn(reverse('clear_analyses'), html)
+
+    def test_recent_table_does_not_number_rows_by_database_id(self):
+        """
+        The # column must not print the row's database id. SQLite never reuses
+        one, so after Clear all the next analysis appeared as #26 and the table
+        looked like the delete had silently failed.
+        """
+        self.client.post(reverse('analyze'), {'news_content': KNOWN_FAKE})
+        self.client.post(reverse('clear_analyses'), {'confirm': 'DELETE'})
+        self.client.post(reverse('analyze'), {'news_content': KNOWN_REAL})
+
+        row = NewsAnalysis.objects.latest('id')
+        html = self.client.get(reverse('dashboard')).content.decode()
+
+        self.assertGreater(row.id, 1, "test needs a row whose id is not 1")
+        self.assertIn('<td class="muted">1</td>', html)
+        self.assertNotIn(f'<td class="muted">{row.id}</td>', html)
+
+    def test_newest_row_carries_the_highest_number(self):
+        """
+        Numbering runs bottom-to-top: oldest is 1, newest is highest. Numbering
+        the newest row 1 means every new analysis takes the number off the row
+        that had it, so nothing in the table keeps a stable label.
+        """
+        for i in range(3):
+            self.client.post(reverse('analyze'), {'news_content': f'{KNOWN_FAKE} {i}'})
+
+        html = self.client.get(reverse('dashboard')).content.decode()
+        shown = re.findall(r'<td class="muted">(\d+)</td>', html)
+
+        # Rendered newest-first, so the numbers count down to 1 at the bottom.
+        self.assertEqual(shown, ['3', '2', '1'])
+
+    def test_numbering_restarts_at_one_after_clear_all(self):
+        """The complaint that started this: a cleared dashboard must count from 1."""
+        self.client.post(reverse('analyze'), {'news_content': KNOWN_FAKE})
+        self.client.post(reverse('clear_analyses'), {'confirm': 'DELETE'})
+        self.client.post(reverse('analyze'), {'news_content': KNOWN_REAL})
+
+        html = self.client.get(reverse('dashboard')).content.decode()
+
+        self.assertEqual(re.findall(r'<td class="muted">(\d+)</td>', html), ['1'])

@@ -1,25 +1,19 @@
 {% extends "analyzer/base.html" %}
 {% comment %}
-result.html — one analysis, explained
-=====================================
-Shows how the verdict was reached, and what it is worth.
+One analysis: how the verdict was reached, and what it is worth.
 
 The rule that shapes this page: NO ARTICLE COUNTS OR ACCURACY FIGURES ARE TYPED
 HERE. They arrive through analysis.explanation, which analysis_engine.py builds
 from the model's own recorded numbers. A figure written into this template would
-survive the next retraining and quietly become a lie. That has already happened
-once in this project.
+survive the next retraining and quietly become a lie.
 
-The web-search block is kept visually separate from the verdict for the same
-reason. The verdict's percentage is measured on 3,160 articles with known
-answers. The web check is measured on nothing. Merging them would produce one
-confident-looking number with only half of it standing on evidence.
+The web-search block stays visually separate from the verdict for the same reason:
+the verdict's percentage is measured on thousands of articles with known answers
+and the web check is measured on nothing, so merging them would produce one
+confident-looking number with half of it standing on evidence.
 
-Two template rules worth knowing before editing this file. The extends tag has
-to come first, ahead of even this comment, or the parser refuses the template.
-And a hash-style comment is single-line only — spread one over two lines and
-Django stops treating it as a comment and prints it into the page. Multi-line
-notes therefore use the comment tag, here and everywhere else in this directory.
+Note that the extends tag must come first, ahead of even this comment, or the
+parser refuses the template.
 {% endcomment %}
 
 {% block title %}Result: {{ analysis.result_label }} — Fake News Analyzer{% endblock %}
@@ -34,10 +28,10 @@ notes therefore use the comment tag, here and everywhere else in this directory.
         <h1 class="verdict-label">{{ analysis.result_label }}</h1>
 
         {% comment %}
-        The percentage means different things depending on how the verdict was
-        reached, so the wording comes from views.py. For the reading model it is
-        how often verdicts like this one are CORRECT — not how sure the model
-        feels. Calling that "confidence" would be wrong.
+        The wording comes from views.py because the percentage means different
+        things depending on how the verdict was reached. For the reading model it
+        is how often verdicts like this one are CORRECT, not how sure the model
+        feels, so calling it "confidence" would be wrong.
         {% endcomment %}
         {% if confidence %}
         <div class="verdict-score">
@@ -52,10 +46,14 @@ notes therefore use the comment tag, here and everywhere else in this directory.
         <h2 class="card-title"><i class="bi bi-cpu"></i> How was this determined?</h2>
 
         {% if method == "database" %}
+        {% comment %}
+        "article", not "headline": a match can come through either door, and which
+        one is spelled out in analysis.explanation below.
+        {% endcomment %}
         <div class="notice notice-lavender">
             <i class="bi bi-database-check"></i>
             <p>
-                <strong>Database match</strong> — this headline was found in our
+                <strong>Database match</strong> — this article was found in our
                 fact-check dataset, so the label above comes straight from that
                 dataset rather than from a prediction.
             </p>
@@ -71,28 +69,49 @@ notes therefore use the comment tag, here and everywhere else in this directory.
                     articles like this one.
                 </p>
             </div>
-            {% elif analysis.result_label == "Likely Real" %}
-            <div class="notice notice-yellow">
-                <i class="bi bi-robot"></i>
-                <p>
-                    <strong>Reading model — weaker verdict</strong> — this
-                    headline was not in our dataset, so our model read the
-                    writing itself. "Likely Real" is the less reliable of its two
-                    answers. Treat it as "nothing obviously wrong", not as
-                    clearance.
-                </p>
-            </div>
             {% else %}
+            {% comment %}
+            The same sentence for both verdicts, on purpose. This used to name
+            which answer was the more reliable one — accurate, and computed from
+            cutoff.json so it could not go stale, but knowing "Likely Fake is the
+            weaker answer" does not change what the reader does next.
+
+            The clearance line stays on "Likely Real" only. That verdict reads as a
+            clean bill of health and is not one: the model never checked whether
+            any of it happened, so a lie in careful prose comes out looking fine.
+            {% endcomment %}
             <div class="notice notice-yellow">
                 <i class="bi bi-robot"></i>
                 <p>
-                    <strong>Reading model — stronger verdict</strong> — this
-                    headline was not in our dataset, so our model read the
-                    writing itself. "Likely Fake" is the more reliable of its two
-                    answers, but it is still wrong sometimes. See below.
+                    <strong>Reading model</strong> — this article was not found
+                    in our dataset, so the prediction is based on the article's
+                    language and writing patterns.
+                    {% if analysis.result_label == "Likely Real" %}
+                        Treat it as "nothing obviously wrong", not as clearance.
+                    {% endif %}
                 </p>
             </div>
             {% endif %}
+
+        {% elif method == "too_short" %}
+        {% comment %}
+        Exact about what happened, because the obvious reading of "Not Sure" is
+        that the model looked and could not decide. It did not look — the text was
+        turned away before the model was reached, which is a different and more
+        honest claim.
+
+        min_words comes from input_check.MIN_WORDS via the view, so the figure here
+        cannot drift away from the limit that produced this page.
+        {% endcomment %}
+        <div class="notice notice-lavender">
+            {# No icon: bi-rulers at 16px read as a missing-glyph box. #}
+            <p>
+                <strong>Not enough text.</strong> This wasn't in our dataset, and
+                there isn't enough here for the model to read, so
+                <strong>nothing was checked</strong>. Paste at least
+                {{ min_words }} words.
+            </p>
+        </div>
 
         {% elif method == "ml_prediction" %}
         <div class="notice notice-coral">
@@ -103,14 +122,23 @@ notes therefore use the comment tag, here and everywhere else in this directory.
                 Its verdicts are less trustworthy; see the explanation below.
             </p>
         </div>
+
+        {% else %}
+        {% comment %}
+        Catch-all, so this card can never render as a bare heading again. Covers
+        method="unavailable" and anything a future step adds before someone writes
+        its wording here. The engine's own explanation is always set.
+        {% endcomment %}
+        <div class="notice notice-plain">
+            <i class="bi bi-question-circle"></i>
+            <p>{{ analysis.explanation }}</p>
+        </div>
         {% endif %}
 
         {% comment %}
-        The bar carries no label of its own. The pill above it already reads
-        "86.9% of these verdicts are correct", and repeating that phrase here
-        through capfirst produced "Of these verdicts are correct" as a heading,
-        which is not a sentence. Skipped entirely for "Not Sure": there is no
-        trustworthy figure to draw.
+        No label on the bar: the pill above already carries the phrase, and running
+        it through capfirst here produced "Of these verdicts are correct", which is
+        not a sentence. Skipped for "Not Sure", which has no figure to draw.
         {% endcomment %}
         {% if confidence %}
         <div class="meter">
@@ -120,10 +148,9 @@ notes therefore use the comment tag, here and everywhere else in this directory.
         {% endif %}
 
         {% comment %}
-        What the model actually looked at. It was trained with a 256 word-piece
-        window, which is roughly 200 words, so on a long paste it never saw the
-        end. Someone reading a verdict on a 400-word article deserves to know
-        which part of it was judged.
+        What the model actually looked at. Its 256 word-piece window is roughly 200
+        words, so on a long paste it never saw the end, and someone reading a
+        verdict on a 400-word article deserves to know which part was judged.
         {% endcomment %}
         {% if method == "reading_model" %}
         <p class="small muted" style="margin-top: var(--space-md);">
@@ -150,24 +177,32 @@ notes therefore use the comment tag, here and everywhere else in this directory.
     </section>
 
     {% comment %}
-    ── WHAT THE WEB SAYS ──
-    A SEPARATE answer, never merged into the verdict above, and when the two
-    disagree the page says so instead of quietly picking one.
+    What the web says: a SEPARATE answer, never merged into the verdict above, and
+    when the two disagree the page says so instead of quietly picking one.
 
-    Only present when the reading model was unsure — see
-    web_check.should_check(). Three states, deliberately worded differently:
+    Present when the model was unsure or when the reader ticked the box on the
+    analyze page. web.reason says which, and the line under the title states it,
+    because a search on a confident article must not look like the model hesitating.
+
+    Three states, deliberately worded differently:
 
       found        we searched and found coverage
       nothing      we searched and found none   (evidence AGAINST the story)
       unavailable  we could not search          (no evidence about anything)
 
-    Collapsing the last two would show the reader a damning signal we never
-    actually measured.
+    Collapsing the last two would show a damning signal we never measured.
     {% endcomment %}
     {% if analysis.web_check %}
     {% with web=analysis.web_check %}
     <section class="card card-tab {% if web.status == 'found' %}tab-mint{% else %}tab-yellow{% endif %} in d3">
         <h2 class="card-title"><i class="bi bi-globe2"></i> What We Found Online</h2>
+
+        {# Older rows have no reason recorded, so a missing value says nothing. #}
+        {% if web.reason == "requested" %}
+        <p class="card-note">You asked us to check this one online.</p>
+        {% elif web.reason == "unsure" %}
+        <p class="card-note">The model was unsure, so we checked online as well.</p>
+        {% endif %}
 
         {% if web.status == 'unavailable' %}
             <div class="notice notice-plain">
@@ -194,11 +229,7 @@ notes therefore use the comment tag, here and everywhere else in this directory.
             </div>
 
         {% else %}
-            {% comment %}
-            The disagreement notice comes FIRST when it applies. It is the most
-            useful thing on the page, so it is not buried under the summary and
-            the outlet lists.
-            {% endcomment %}
+            {# Disagreement first: it is the most useful thing on the page. #}
             {% if web.verdict == 'REAL' and analysis.result_label == 'Likely Fake' %}
                 <div class="notice notice-loud">
                     <i class="bi bi-exclamation-diamond-fill"></i>
@@ -279,11 +310,7 @@ notes therefore use the comment tag, here and everywhere else in this directory.
     {% endwith %}
     {% endif %}
 
-    {% comment %}
-    ── THE MATCHED ARTICLE ──
-    So the reader can judge it themselves instead of only being handed a
-    verdict. Only present when Step 1 found something.
-    {% endcomment %}
+    {# The matched article, so the reader can judge it rather than take the verdict. #}
     {% if analysis.matched_headline %}
     <section class="card card-tab tab-lavender in d3">
         <h2 class="card-title"><i class="bi bi-file-earmark-text"></i> The Article We Matched</h2>
@@ -295,39 +322,6 @@ notes therefore use the comment tag, here and everywhere else in this directory.
         {% endif %}
     </section>
     {% endif %}
-
-    {% comment %}
-    ── THE WARNING ──
-    On EVERY result, deliberately. It used to be hidden for "Likely Real", which
-    was safe only while that verdict came from an exact dataset match. The
-    reading model returns "Likely Real" too, and that is its weaker answer —
-    precisely the case where a user most needs telling not to rely on it.
-    {% endcomment %}
-    <section class="card card-tab tab-coral in d3">
-        <h2 class="card-title"><i class="bi bi-exclamation-triangle-fill"></i> Before you share this</h2>
-        {% if analysis.result_label == 'Not Sure' %}
-        <p>
-            "Not Sure" does not mean the article is fine, and it does not mean it
-            is fake. It means this tool had nothing reliable to tell you about
-            it. Check the story against several trusted outlets before believing
-            or sharing it.
-        </p>
-        {% elif method == 'database' %}
-        <p>
-            This label was recorded by whoever assembled our dataset — it is a
-            lookup, not an independent check of the article's claims. Always
-            verify news against multiple trusted sources before sharing.
-        </p>
-        {% else %}
-        <p>
-            This verdict is a prediction from a machine-learning model, and the
-            percentage above is how often verdicts like it turn out correct —
-            which is nowhere near always. It is not a substitute for checking the
-            story yourself. Always verify news against multiple trusted sources
-            before sharing.
-        </p>
-        {% endif %}
-    </section>
 
     <div class="btn-row btn-row-center">
         <a href="{% url 'analyze' %}" class="btn btn-primary" id="btn-analyze-another">

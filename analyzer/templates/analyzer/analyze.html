@@ -1,19 +1,13 @@
 {% extends "analyzer/base.html" %}
 {% comment %}
-analyze.html — the input page
-=============================
-One textarea. First line is treated as the headline, the rest as the body —
+The input page. One textarea: first line is the headline, the rest is the body —
 see views.analyze(), which splits on the first newline.
 
-The word counter is the only piece of logic on this page, and it exists because
-the server rejects input outside 25-400 words. Finding that out after submitting
-means losing your paste and the page you were reading it on. It reads its limits
-from data- attributes on the textarea (set in forms.py from input_check.py), so
-there is no second copy of the numbers to go stale.
-
-It advises, it never blocks. The counter runs on the browser's idea of a word;
-clean_news_content() runs on Python's. They agree on English prose, and where
-they might not, the server is the one that decides.
+The word counter is the only logic here, and it exists because the server rejects
+input outside 25-400 words; finding that out after submitting means losing your
+paste. It reads its limits from data- attributes on the textarea (set in forms.py
+from input_check.py), so there is no second copy of the numbers to go stale, and
+it advises rather than blocks — the server is the one that decides.
 {% endcomment %}
 
 {% block title %}Analyze News — Fake News Analyzer{% endblock %}
@@ -57,6 +51,31 @@ they might not, the server is the one that decides.
             <span class="counter" id="word-count" aria-live="polite">0 words</span>
         </div>
 
+        {% comment %}
+        The web-search opt-in. Absent from the form entirely when there is no API
+        key (see NewsInputForm.__init__), rather than offering a box that could
+        only ever fail.
+
+        Unticked is NOT "no web search": the engine still searches on its own when
+        the model lands in the range where it is unreliable. This adds searches on
+        top of that, which is why the label says "also".
+        {% endcomment %}
+        {% if form.search_web %}
+        <label class="field-check" for="{{ form.search_web.id_for_label }}">
+            {{ form.search_web }}
+            <span>
+                <strong>{{ form.search_web.label }}</strong>
+                {% comment %}
+                The id is required, not decorative: Django points the input's
+                aria-describedby at "<field id>_helptext" whenever a field has
+                help_text, and rendering that text by hand leaves the reference
+                dangling — a screen reader announces the box with no explanation.
+                {% endcomment %}
+                <small id="{{ form.search_web.auto_id }}_helptext">{{ form.search_web.help_text }}</small>
+            </span>
+        </label>
+        {% endif %}
+
         <div style="margin-top: var(--space-lg);">
             <button type="submit" class="btn btn-primary btn-lg btn-block" id="submit-btn">
                 <i class="bi bi-cpu"></i> Analyze now
@@ -64,29 +83,16 @@ they might not, the server is the one that decides.
         </div>
     </form>
 
-    <div class="notice notice-lavender in d2" style="margin-top: var(--space-lg);">
-        <i class="bi bi-lightbulb"></i>
-        <p>
-            <strong>Tip.</strong> Put the headline on its own first line. That is
-            the line we look up in the fact-check database, and a match there is
-            worth more than anything the model can guess.
-        </p>
-    </div>
-
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
 /*
- * Live word count.
- *
- * The pattern matches Python's re.findall(r"[\w'-]+", ...) in
- * input_check.word_count(), so the two agree. Not perfectly: JavaScript's \w is
- * ASCII-only while Python's is Unicode-aware, so an accented word counts here
- * and there in different ways. That difference does not matter, because this
- * counter only ever advises — the server decides, and this page never claims
- * otherwise.
+ * Live word count. The pattern matches Python's re.findall(r"[\w'-]+", ...) in
+ * input_check.word_count(), though not exactly: JavaScript's \w is ASCII-only
+ * while Python's is Unicode-aware, so accented words count differently. Harmless,
+ * because this only advises and the server decides.
  */
 (function () {
     var box = document.getElementById('content-input');
@@ -97,6 +103,35 @@ they might not, the server is the one that decides.
     var MIN = parseInt(box.dataset.minWords, 10) || 25;
     var MAX = parseInt(box.dataset.maxWords, 10) || 400;
     var DEFAULT_HINT = hint ? hint.textContent : '';
+
+    /*
+     * Grow the box to fit what is in it, replacing the drag handle that used to
+     * let it be pulled out of line with its card.
+     *
+     * Three things here are load-bearing. height is cleared first so the box can
+     * shrink as well as grow. The border is added back on because box-sizing is
+     * border-box — height covers the border, scrollHeight does not, and setting
+     * one to the other leaves the box 5px short of its own contents. And overflow
+     * is ours to set rather than the browser's to guess, or a scrollbar appears
+     * mid-resize with nothing clipped.
+     */
+    function fit() {
+        var style = getComputedStyle(box);
+        var borderY = parseFloat(style.borderTopWidth) +
+                      parseFloat(style.borderBottomWidth);
+        var cap = parseFloat(style.maxHeight);  // 65vh, already resolved to px
+
+        // Measured with the scrollbar out of the way, so its width cannot
+        // change the wrapping and feed back into the height.
+        box.style.overflowY = 'hidden';
+        box.style.height = 'auto';
+
+        var needed = box.scrollHeight + borderY;
+
+        // CSS clamps this at max-height; the scrollbar is only for that case.
+        box.style.height = needed + 'px';
+        box.style.overflowY = needed > cap ? 'auto' : 'hidden';
+    }
 
     function update() {
         var found = box.value.match(/[\w'-]+/g);
@@ -136,7 +171,15 @@ they might not, the server is the one that decides.
     }
 
     box.addEventListener('input', update);
+    box.addEventListener('input', fit);
+
+    // The ceiling is 65vh, so it moves when the window does. Without this a box
+    // sized against a tall window keeps that height in a short one and pushes
+    // the Analyze button off the screen.
+    window.addEventListener('resize', fit);
+
     update();  // a browser-restored paste is already there on load
+    fit();     // ...and it has to be sized for, not just counted
 })();
 </script>
 {% endblock %}

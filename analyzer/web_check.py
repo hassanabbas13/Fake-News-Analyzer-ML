@@ -1,66 +1,30 @@
 """
-web_check.py — Ask the internet whether a story is real
-=======================================================
+Ask the internet whether a story is real.
 
-What this is for
-----------------
-The reading model is excellent at the easy cases and close to useless in the
-middle. tune_cutoff.py measures exactly where that middle is and records it in
-reading_model/cutoff.json as `unsure_band`: for the current model, scores between
-0.01 and 0.99, which is about 15% of articles and where the verdict is right only
-61% of the time. Outside that band it is right 93% of the time.
+Meant for the ~15% of articles inside cutoff.json's `unsure_band`, where the
+model is right only 61% of the time against 93% outside it. Every call spends one
+of 500 free grounded searches a day, and the confident articles are already right.
 
-So this module exists to be called on that 15%, and NOT on the other 85%. Every
-call costs an API request against a free allowance of 500 grounded searches a
-day, and on the confident articles the model already knows the answer.
+Asks Gemini with Google Search on, and asks a narrower question than "is this
+fake": WHO is reporting this, and what are they saying. Two traps make a naive
+"did I find it online" check worse than useless:
 
-What it does
-------------
-Sends the headline and the opening of the article to Gemini with Google Search
-switched on, and asks a narrower question than "is this fake": WHO is reporting
-this story, and what are they saying about it.
+  1. A viral fabrication is covered heavily — as a debunking. Counting hits on
+     "bleach cures cancer" concludes "widely reported, must be real". So outlets
+     REPORTING and outlets DEBUNKING come back as two separate lists.
+  2. Real news from an hour ago has no corroboration yet, so thin evidence
+     returns UNCLEAR and never FAKE.
 
-That distinction is the whole design. Two traps make a naive "did I find it
-online" check worse than useless:
+Produces no number and never touches the model's verdict: that one is measured on
+thousands of articles with known answers, this is measured on nothing. The app
+shows both and says plainly when they disagree.
 
-  1. A viral fabrication is covered heavily -- as a debunking. Search "bleach
-     cures cancer" and you get hundreds of hits. Count hits and you conclude
-     "widely reported, must be real", which is exactly backwards. So the prompt
-     asks Gemini to separate outlets REPORTING the story from outlets DEBUNKING
-     it, and they are returned as two different lists.
+Failure is normal and never an exception — no key, no network, timeout, exhausted
+quota all return status 'unavailable'. That is NOT the same answer as 'nothing':
+"no outlet is carrying this" is evidence against an article, "we could not check"
+is evidence about nothing.
 
-  2. Real news from an hour ago has no corroboration yet. One outlet carrying a
-     genuine story is normal, not suspicious. So a thin result returns UNCLEAR
-     rather than FAKE.
-
-What it deliberately does not do
---------------------------------
-It does not produce a number, and it does not touch the model's verdict. The
-model's 88.45% is measured on 3,160 articles with known answers; this is not
-measured on anything, because doing so honestly would mean thousands of API
-calls against 2016-era stories the web has largely forgotten. An unmeasured
-signal must not be allowed to silently overwrite a measured one, so the app shows
-both and says plainly when they disagree.
-
-Failure is normal, and never an exception
------------------------------------------
-No key, no network, a timeout, an exhausted quota: all of these are expected and
-all of them return a result with status 'unavailable' instead of raising. The
-model's answer is local and must render whatever happens out here.
-
-Note that 'unavailable' and 'nothing' are different answers and the app must not
-show them the same way. "No outlet is carrying this story" is evidence against an
-article. "We could not check" is not evidence about anything, and dressing one up
-as the other would mislead the reader.
-
-Usage
------
-  from analyzer.web_check import check_online, should_check
-  if should_check(fake_score):
-      result = check_online(headline, article_text)
-
-Standalone, for testing without the app:
-  python -m analyzer.web_check "Some headline to look up"
+Standalone: python -m analyzer.web_check "Some headline to look up"
 """
 
 import json
@@ -70,20 +34,16 @@ import time
 import urllib.error
 import urllib.request
 
-# Gemini 2.5 Flash, not a 3.x model. As of 24 Aug 2026 Google's free tier offers
-# grounded Google Search only on 2.5 Flash and 2.5 Flash-Lite; on the 3.x text
-# models grounding is paid-only. "upgrading" the model here would silently cost
-# the free search allowance.
+# 2.5 Flash, not a 3.x model: as of 24 Aug 2026 the free tier offers grounded
+# search only on 2.5 Flash and Flash-Lite, so "upgrading" here costs money.
 MODEL = 'gemini-2.5-flash'
 ENDPOINT = ('https://generativelanguage.googleapis.com/v1beta/models/'
             '{model}:generateContent')
 
-# Seconds to wait before giving up. Someone is watching a page load, and the
-# model's own answer is already sitting there ready to show.
+# Someone is watching a page load, and the model's answer is already ready.
 TIMEOUT = 12
 
-# How much of the article to send. The headline plus the opening carries the
-# claim; the rest is padding that costs tokens and slows the call.
+# The headline plus the opening carries the claim; the rest costs tokens.
 MAX_CHARS = 1500
 
 # Where the key is read from, in order. Never hardcoded, never committed.
@@ -127,10 +87,6 @@ HEADLINE: {headline}
 OPENING: {body}"""
 
 
-# ============================================================================
-# THE KEY
-# ============================================================================
-
 def _read_key():
     """Environment first, then .env. Returns None if there is no key anywhere."""
     key = os.environ.get(ENV_VAR)
@@ -155,19 +111,12 @@ def has_key():
     return _read_key() is not None
 
 
-# ============================================================================
-# WHEN TO BOTHER
-# ============================================================================
-
 def unsure_band():
     """
-    The score range where the model's verdict is not worth trusting, as measured
-    by tune_cutoff.py.
-
-    Read from disk rather than written here on purpose. The band belongs to one
-    particular set of model weights; retrain and the middle moves. A pair of
-    numbers typed into this file would go stale silently and the app would start
-    paying for searches on articles it already had right.
+    The score range where the verdict is not worth trusting, as measured by
+    tune_cutoff.py. Read from disk on purpose: the band belongs to one set of model
+    weights, so numbers typed in here would go stale silently and the app would
+    start searching for articles it already had right.
     """
     try:
         with open(CUTOFF_PATH, encoding='utf-8') as fh:
@@ -180,13 +129,9 @@ def unsure_band():
 
 
 def should_check(fake_score):
-    """
-    True when this article falls in the band where the model is unreliable.
-
-    Returns False if there is no key, no measured band, or no score — in every
-    one of those cases the honest thing is to skip the search rather than guess
-    at when it is needed.
-    """
+    """True when this article falls in the band where the model is unreliable.
+    False with no key, no measured band or no score: skip rather than guess at
+    when a search is needed."""
     if fake_score is None or not has_key():
         return False
     band = unsure_band()
@@ -195,10 +140,6 @@ def should_check(fake_score):
     low, high = band
     return low < float(fake_score) < high
 
-
-# ============================================================================
-# THE CALL
-# ============================================================================
 
 def _blank(status, error=None, elapsed=0.0):
     """A result the template can always render, whatever went wrong."""
@@ -218,13 +159,9 @@ def _blank(status, error=None, elapsed=0.0):
 
 
 def _extract_json(text):
-    """
-    Pull the JSON object out of the reply.
-
-    Asked for bare JSON, models still sometimes wrap it in a ```json fence or add
-    a sentence first. Rather than fail the whole check over formatting, find the
-    outermost braces and parse that.
-    """
+    """Pull the JSON object out of the reply. Asked for bare JSON, models still
+    sometimes add a ```json fence or a sentence first, so rather than fail the
+    check over formatting, find the outermost braces and parse that."""
     text = re.sub(r'^\s*```(?:json)?|```\s*$', '', text.strip(),
                   flags=re.MULTILINE)
     try:
@@ -256,12 +193,9 @@ def _clean_list(value, limit=8):
 
 def check_online(headline, article_text='', timeout=TIMEOUT):
     """
-    Ask the web about this story. Never raises.
-
-    Returns the dict built by _blank(), filled in. 'sources' comes from Gemini's
-    own grounding metadata rather than from its prose — those are the pages it
-    actually consulted, so they are the part of the answer that cannot be
-    invented.
+    Ask the web about this story. Never raises; returns the _blank() dict filled
+    in. 'sources' comes from Gemini's grounding metadata rather than its prose —
+    the pages it actually consulted, which is the part it cannot invent.
     """
     started = time.time()
 
@@ -278,8 +212,7 @@ def check_online(headline, article_text='', timeout=TIMEOUT):
     payload = {
         'contents': [{'parts': [{'text': prompt}]}],
         'tools': [{'google_search': {}}],
-        # Low temperature: this is a lookup, not a piece of writing. We want the
-        # same story to get the same answer twice.
+        # A lookup, not a piece of writing: same story, same answer twice.
         'generationConfig': {'temperature': 0.1},
     }
 
@@ -370,10 +303,6 @@ def _read_reply(data, elapsed):
 
     return result
 
-
-# ============================================================================
-# STANDALONE TEST
-# ============================================================================
 
 def _demo(headline, body=''):
     print('=' * 70)

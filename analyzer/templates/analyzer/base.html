@@ -1,22 +1,17 @@
 {% load static %}{% comment %}
-base.html — the skeleton every page extends
-===========================================
-Neo-brutalism: hard black borders, offset shadows, buttons that press down.
-The colours mean things — see the note at the top of static/analyzer/style.css
-before adding any.
+The skeleton every page extends. Neo-brutalism: hard black borders, offset
+shadows, buttons that press down. The colours mean things — see the note at the
+top of static/analyzer/style.css before adding any.
 
-Bootstrap's stylesheet is gone. It was fighting the flat borders and hard
-shadows on every element, and the layouts here are small enough to write
-directly. Bootstrap ICONS stay: that is a font file, not a layout system, and
-the templates use `bi bi-*` throughout.
+Bootstrap ICONS only, no Bootstrap stylesheet: the templates use `bi bi-*`
+throughout, but the grid was fighting the flat borders on every element.
 
-Each page marks its own nav tab by filling one of the nav_* blocks with
-"active" — a plain string, so nothing has to be passed from views.py.
+Each page marks its own nav tab by filling a nav_* block with "active", so
+nothing has to be passed from views.py.
 
-Note the comment syntax. {# #} in Django is SINGLE-LINE ONLY: spread it over
-two lines and the template engine stops treating it as a comment and prints it
-into the page. Multi-line notes therefore use {% comment %}, here and in every
-other template in this directory.
+Watch the comment syntax: {# #} is SINGLE-LINE ONLY in Django. Spread one over
+two lines and the engine prints it into the page, so multi-line notes use
+{% templatetag openblock %} comment {% templatetag closeblock %} instead.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="en">
@@ -68,11 +63,6 @@ other template in this directory.
 <main>
     {% block content %}{% endblock %}
 </main>
-
-<footer class="foot">
-    A student project. Every verdict is a guess with a measured error rate —
-    check important stories against several trusted outlets.
-</footer>
 
 {% block extra_scripts %}{% endblock %}
 </body>

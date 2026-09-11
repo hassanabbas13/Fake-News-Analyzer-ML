@@ -1,16 +1,10 @@
 {% extends "analyzer/base.html" %}
 {% comment %}
-home.html — landing page
-========================
-Deliberately free of numbers. Accuracy figures live in analysis_engine.py and
-reach the page through analysis.explanation; anything typed here would be a
-second copy that goes stale the next time the model is retrained. That has
-already happened once in this project, to a docstring that kept quoting 74%
-through two retrainings.
+The landing page: what the tool is, and a way in.
 
-So this page explains the ORDER the three steps run in, which is the real
-explanation anyway: the database answers first because a recorded fact-check
-beats a guess, and the model only ever sees what the database missed.
+Deliberately free of numbers. Accuracy figures live in analysis_engine.py and
+reach the pages through analysis.explanation; anything typed here would be a
+second copy that goes stale the next time the model is retrained.
 {% endcomment %}
 
 {% block title %}Fake News Analyzer — Home{% endblock %}
@@ -20,18 +14,15 @@ beats a guess, and the model only ever sees what the database missed.
 <div class="wrap">
 
     <section class="hero in">
-        <span class="pill pill-lavender">
-            <i class="bi bi-stack"></i> Database → Model → Web search
-        </span>
-
-        <h1 class="hero-title" style="margin-top: var(--space-lg);">
+        {# No margin-top: .hero's own padding does the job. #}
+        <h1 class="hero-title">
             Is this story <span class="mark">real</span>?
         </h1>
 
         <p class="hero-sub">
-            Paste a headline and the opening of an article. We check it against a
-            fact-check database first, read the writing with a trained model
-            second, and go looking online when the model is unsure.
+            Paste news or article. We check it against a fact-check database
+            first, read the writing with a trained model second and go looking
+            online when the model is unsure.
         </p>
 
         <div class="btn-row btn-row-center">
@@ -52,49 +43,6 @@ beats a guess, and the model only ever sees what the database missed.
         </div>
         {% endif %}
     </section>
-
-    <section class="steps in d1">
-        <article class="step">
-            <div class="step-num">1</div>
-            <h3>Look it up</h3>
-            <p>
-                If the headline is one already recorded in our fact-check
-                database, you get that record — a lookup, not a guess. This is
-                the most reliable answer the tool gives.
-            </p>
-        </article>
-
-        <article class="step">
-            <div class="step-num">2</div>
-            <h3>Read the writing</h3>
-            <p>
-                Otherwise a language model trained on tens of thousands of real
-                and fake articles reads the text itself and says which it looks
-                more like. It tells you how often verdicts like yours turn out
-                correct.
-            </p>
-        </article>
-
-        <article class="step">
-            <div class="step-num">3</div>
-            <h3>Ask the web</h3>
-            <p>
-                When the model lands in the range where it is measurably
-                unreliable, we search the news for the story and show what we
-                find — including who is debunking it.
-            </p>
-        </article>
-    </section>
-
-    <div class="notice notice-yellow in d2" style="margin-top: var(--space-xl);">
-        <i class="bi bi-exclamation-triangle-fill"></i>
-        <p>
-            <strong>This is a student project, not a fact-checker.</strong>
-            Every verdict is a prediction with a real error rate, and it is
-            shown to you alongside the verdict for exactly that reason. Check
-            anything that matters against several trusted outlets.
-        </p>
-    </div>
 
 </div>
 {% endblock %}

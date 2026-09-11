@@ -1,17 +1,22 @@
 # ---------------------------------------------------------------------------
-# Big files. Kept out on purpose, not by accident.
+# Big files.
 #
-# All of these can be rebuilt from the scripts in this repo, and together they
-# are ~500MB, which would make every clone slow forever. See
-# WHERE_I_LEFT_OFF.txt for the exact commands to regenerate each one.
+# The model and the database ARE shipped, through git-lfs, so that a clone can
+# run the app straight away instead of retraining a model first. See
+# .gitattributes for what LFS handles and README.md for the fallback if the
+# free LFS bandwidth runs out.
+#
+# The training CSVs are NOT shipped: ~206MB, only needed to retrain, and every
+# one of them is downloadable or regenerable from the scripts here.
 # ---------------------------------------------------------------------------
 
-# The trained DistilBERT. 255MB for model.safetensors alone, which is over
-# GitHub's 100MB per-file hard limit, so this CANNOT be pushed without git-lfs.
-# Rebuild: train_reading_model_v3.ipynb on Colab (~40 min), then tune_cutoff.py.
-analyzer/reading_model/
+# The trained DistilBERT lives in git-lfs (255MB, over GitHub's 100MB limit).
+# Rebuild if ever needed: train_reading_model_v3.ipynb on Colab, then
+# tune_cutoff.py. Its working scores file is not worth shipping:
+analyzer/reading_model/mcintire_scores.csv
 
-# The old TF-IDF word-counter. Rebuild: python train_honest_model.py
+# The old TF-IDF word-counter, only used when the reading model is missing.
+# Rebuild: python train_honest_model.py
 analyzer/model.pkl
 analyzer/vectorizer.pkl
 analyzer/model_meta.json
@@ -23,8 +28,7 @@ analyzer/model_meta.json
 #   diverse_reals.csv           python fetch_diverse_reals.py
 *.csv
 
-# The fact-check database, 45MB. Rebuild: python load_mega_data.py
-db.sqlite3
+# db.sqlite3 is shipped through git-lfs (106MB). Rebuild: python load_mega_data.py
 
 # ---------------------------------------------------------------------------
 # Ordinary Python and editor noise
