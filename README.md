@@ -115,16 +115,6 @@ python -m analyzer.web_check "some headline"
 
 `REAL TESTING.md` holds ten hand-written articles that aren't in the database. `news articles.md` holds twenty that are, for testing Step 1.
 
----
-
-## Limitations
-
-- **"REAL" means "published by a real newsroom", not "fact-checked".** All 59,660 rows are labelled by source.
-- **A "Likely Real" verdict is not clearance.** Nothing here checks whether the events described happened.
-- **Step 1 is exact matching.** A reworded headline on a paraphrased body falls through to the model.
-- **The web check has no accuracy figure.** It has never been scored, which is why it's shown separately.
-- **Dashboard percentages aren't accuracy.** They show what people pasted, not whether the verdicts were right.
-- **English news only.**
 
 ---
 
