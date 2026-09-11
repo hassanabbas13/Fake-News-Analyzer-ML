@@ -72,14 +72,14 @@ That's the whole setup. The trained model and the 59,660-article database come d
 
 ### If the model or database didn't arrive
 
-GitHub's free LFS allowance is 1 GB of bandwidth a month and these two files are ~379 MB, so after a few clones they arrive as small placeholder files instead.
+Two things cause this, and both leave the same symptom: the files are present but only a few hundred bytes. Either Git LFS wasn't installed before cloning, or GitHub's free LFS allowance ran out. The allowance is 1 GB of bandwidth a month and these two files are ~379 MB, so a few clones exhaust it.
 
 ```bash
 python setup.py --check    # report what's missing
 python setup.py            # download it from the GitHub Release
 ```
 
-Without them, the app reports "analysis unavailable" rather than guessing.
+Without them, the app reports "analysis unavailable" rather than guessing. The files are also attached to the [v1.0 release](https://github.com/hassanabbas13/Fake-News-Analyzer-ML/releases/tag/v1.0) if you would rather download them by hand.
 
 ### Optional: web search
 
